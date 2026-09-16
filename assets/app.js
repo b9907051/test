@@ -27,17 +27,20 @@
     if (saved.currency) state.currency = saved.currency;
     if (saved.twdRate) state.twdRate = saved.twdRate;
     if (saved.providerGpu) state.providerGpu = saved.providerGpu;
+    if (saved.indexGpu) state.indexGpu = saved.indexGpu;
   } catch (_) { /* storage unavailable: defaults are fine */ }
   const persist = () => {
     try {
       localStorage.setItem("aipt-state", JSON.stringify({
         type: state.type, rangeDays: state.rangeDays, gpus: [...state.gpus],
-        currency: state.currency, twdRate: state.twdRate, providerGpu: state.providerGpu,
+        currency: state.currency, twdRate: state.twdRate, providerGpu: state.providerGpu, indexGpu: state.indexGpu,
       }));
     } catch (_) { /* ignore */ }
   };
 
   let CAT, GPU, PROV, ROWS, DATES, LATEST;
+  let IXSRC = {}, IXROWS = [], IXMETA = {};            // third-party indices
+  const IXIDX = new Map();                             // `${index}|${gpu}` -> [{t,d,v,src}] sorted
   // index: `${gpu}|${type}` -> Map(provider -> [{t, d, usd, src}] sorted by t)
   const IDX = new Map();
 
@@ -445,8 +448,71 @@
     a.click(); URL.revokeObjectURL(a.href);
   }
 
+  // ------------------------------------------------------------ market indices
+  const ixSeries = (ix, gpu) => IXIDX.get(`${ix}|${gpu}`) || [];
+  function ixAt(list, t, carry = 7) { const p = priceAt(list, t); return p && t - p.t <= carry * DAY ? p : null; }
+  const accessName = (a) => ({ free: "免費開放", "free-tier": "免費層", paid: "付費訂閱", manual: "人工登錄" })[a] || a;
+  function renderIndices() {
+    const sel = $("#index-gpu");
+    if (!sel.options.length) {
+      const covered = CAT.gpus.filter((g) => Object.values(IXSRC).some((s) => s.gpus[g.id]));
+      for (const g of covered) { const o = document.createElement("option"); o.value = g.id; o.textContent = g.name; sel.appendChild(o); }
+      sel.value = state.indexGpu && covered.some((g) => g.id === state.indexGpu) ? state.indexGpu : (covered[0]?.id || "");
+      state.indexGpu = sel.value;
+    }
+    const gpu = state.indexGpu, dates = datesInRange(), t = latestT();
+    // daily axis for indices (they settle daily; our snapshots may be sparser)
+    const ixDates = [...new Set(IXROWS.filter((r) => r.gpu === gpu).map((r) => r.d))].sort();
+    const from = state.rangeDays ? t - state.rangeDays * DAY : -Infinity;
+    const axis = [...new Set([...ixDates, ...dates])].filter((d) => toT(d) >= from).sort();
+    const series = [{ id: "tracker", name: "本站中位數", color: "var(--s1)", values: axis.map((d) => medianAt(gpu, "on-demand", toT(d))), hidden: state.hidden.has("ix:tracker") }];
+    for (const src of Object.values(IXSRC)) {
+      const list = ixSeries(src.id, gpu); if (!list.length) continue;
+      series.push({ id: src.id, name: src.short, color: SLOT_VAR(src.slot), hidden: state.hidden.has("ix:" + src.id), values: axis.map((d) => { const p = ixAt(list, toT(d)); return p ? p.v : null; }) });
+    }
+    lineChart($("#index-chart"), axis, series, { fmtY: (v, exact) => fmtMoney(v, exact ? undefined : v >= 10 ? 0 : 1), aria: "第三方指數與本站中位數比較", height: 300, rightPad: 150 });
+    const lg = $("#index-legend"); lg.innerHTML = "";
+    for (const sr of series) {
+      const li = document.createElement("li"); li.style.setProperty("--c", sr.color); li.className = sr.hidden ? "off" : "";
+      li.innerHTML = `<span class="sw"></span>${sr.id === "tracker" ? "本站隨需中位數" : IXSRC[sr.id].name}`;
+      li.addEventListener("click", () => { const k = "ix:" + sr.id; state.hidden.has(k) ? state.hidden.delete(k) : state.hidden.add(k); renderIndices(); });
+      lg.appendChild(li);
+    }
+    // comparison table
+    const ours = medianAt(gpu, "on-demand", t);
+    let html = `<table class="data"><thead><tr><th>指數</th><th class="num">最新值</th><th>日期</th><th class="num">7 日</th><th class="num">30 日</th><th class="num">本站 vs 指數</th><th>取得方式</th></tr></thead><tbody>`;
+    html += `<tr><td><b>本站隨需中位數</b></td><td class="num">${fmtMoney(ours)}</td><td class="src">${LATEST}</td><td class="num ${cls(changeOver((tt) => medianAt(gpu, "on-demand", tt), 7))}">${fmtPct(changeOver((tt) => medianAt(gpu, "on-demand", tt), 7))}</td><td class="num ${cls(changeOver((tt) => medianAt(gpu, "on-demand", tt), 30))}">${fmtPct(changeOver((tt) => medianAt(gpu, "on-demand", tt), 30))}</td><td class="num">–</td><td class="src">${providerCount(gpu, "on-demand", t)} 家供應商牌價</td></tr>`;
+    let n = 0;
+    for (const src of Object.values(IXSRC)) {
+      const list = ixSeries(src.id, gpu);
+      const last = list.length ? list[list.length - 1] : null;
+      if (!last) {
+        if (src.gpus[gpu]) html += `<tr><td>${src.name}</td><td class="num">–</td><td class="src">尚無資料</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td class="src">${accessName(src.access)}</td></tr>`;
+        continue;
+      }
+      n++;
+      const at = (days) => { const p = priceAt(list, last.t - days * DAY); return p ? last.v / p.v - 1 : null; };
+      const prem = ours != null ? ours / last.v - 1 : null;
+      html += `<tr><td>${src.name}</td><td class="num"><b>${fmtMoney(last.v)}</b></td><td class="src">${last.d}${last.src === "demo" ? " (示範)" : ""}</td><td class="num ${cls(at(7))}">${fmtPct(at(7))}</td><td class="num ${cls(at(30))}">${fmtPct(at(30))}</td><td class="num">${prem == null ? "–" : (prem > 0 ? "+" : "") + (prem * 100).toFixed(1) + "%"}</td><td class="src">${accessName(src.access)}</td></tr>`;
+    }
+    html += "</tbody></table>";
+    $("#index-table").innerHTML = html;
+    $("#index-hint").textContent = n ? `${n} 個指數 · 「本站 vs 指數」= 本站牌價中位數相對指數的溢價（正值代表牌價高於成交／指數水準）` : "此機型尚無指數資料";
+    // source cards
+    const cards = $("#index-sources"); cards.innerHTML = "";
+    for (const src of Object.values(IXSRC)) {
+      const cov = Object.keys(src.gpus).filter((id) => GPU[id]).map((id) => GPU[id].short).join("、");
+      const el = document.createElement("div"); el.className = "ixcard"; el.style.setProperty("--c", SLOT_VAR(src.slot));
+      el.innerHTML = `<div class="ixh"><span class="sw"></span><a href="${src.url}" target="_blank" rel="noopener">${src.name}</a><span class="tag ${src.access}">${accessName(src.access)}</span></div>
+        <div class="ixm">${src.method}</div>
+        <div class="ixf"><span>更新：${src.cadence}</span><span>涵蓋：${cov}</span><span>授權：${src.license}</span></div>`;
+      cards.appendChild(el);
+    }
+    $("#index-demo").style.display = IXMETA.demo ? "" : "none";
+  }
+
   function renderAll() {
-    renderHeader(); renderControls(); renderKpis(); renderTrend(); renderProviders(); renderHeatmap(); renderValue(); renderTable();
+    renderHeader(); renderControls(); renderKpis(); renderTrend(); renderProviders(); renderHeatmap(); renderValue(); renderTable(); renderIndices();
   }
 
   // ------------------------------------------------------------ wiring
@@ -457,6 +523,7 @@
     $("#twd-rate").addEventListener("change", (e) => { const v = parseFloat(e.target.value); if (v > 0) { state.twdRate = v; persist(); renderAll(); } });
     $("#provider-gpu").addEventListener("change", (e) => { state.providerGpu = e.target.value; persist(); renderProviders(); });
     $("#value-seg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.valueMetric = b.dataset.v; renderControls(); renderValue(); });
+    $("#index-gpu").addEventListener("change", (e) => { state.indexGpu = e.target.value; persist(); renderIndices(); });
     $("#export-latest").addEventListener("click", () => exportCsv(false));
     $("#export-all").addEventListener("click", () => exportCsv(true));
     $("#theme-toggle").addEventListener("click", () => {
@@ -467,12 +534,16 @@
       renderHeatmap();
     });
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderHeatmap());
-    let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { renderTrend(); renderProviders(); renderValue(); }, 120); }).observe($("#trend-chart"));
+    let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { renderTrend(); renderProviders(); renderValue(); renderIndices(); }, 120); }).observe($("#trend-chart"));
   }
 
   async function load() {
     try {
-      const [cat, prices] = await Promise.all([fetch("data/catalog.json").then((r) => r.json()), fetch("data/prices.json").then((r) => r.json())]);
+      const [cat, prices, ixsrc, ix] = await Promise.all([
+        fetch("data/catalog.json").then((r) => r.json()), fetch("data/prices.json").then((r) => r.json()),
+        fetch("data/index_sources.json").then((r) => r.json()).catch(() => ({ indices: [] })),
+        fetch("data/indices.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [] })),
+      ]);
       CAT = cat; GPU = Object.fromEntries(cat.gpus.map((g) => [g.id, g])); PROV = Object.fromEntries(cat.providers.map((p) => [p.id, p]));
       ROWS = prices.rows.filter((r) => GPU[r[2]] && PROV[r[1]]).map((r) => ({ d: r[0], t: toT(r[0]), provider: r[1], gpu: r[2], type: r[3], usd: +r[4], src: r[5] }));
       ROWS.meta = prices.meta || {};
@@ -482,6 +553,12 @@
       }
       for (const m of IDX.values()) for (const l of m.values()) l.sort((a, b) => a.t - b.t);
       DATES = [...new Set(ROWS.map((r) => r.d))].sort(); LATEST = DATES[DATES.length - 1];
+      const SHORT = { cgi: "CGI", ocpi: "OCPI", sdh: "Silicon Data", gci: "AxonIndex GCI" };
+      IXSRC = Object.fromEntries((ixsrc.indices || []).map((sx) => [sx.id, { ...sx, short: SHORT[sx.id] || sx.publisher }]));
+      IXMETA = ix.meta || {};
+      IXROWS = (ix.rows || []).filter((r) => IXSRC[r[1]] && GPU[r[2]]).map((r) => ({ d: r[0], t: toT(r[0]), ix: r[1], gpu: r[2], v: +r[3], src: r[4] }));
+      for (const r of IXROWS) { const k = `${r.ix}|${r.gpu}`; if (!IXIDX.has(k)) IXIDX.set(k, []); IXIDX.get(k).push(r); }
+      for (const l of IXIDX.values()) l.sort((a, b) => a.t - b.t);
       for (const id of [...state.gpus]) if (!GPU[id]) state.gpus.delete(id);
       if (!GPU[state.providerGpu]) state.providerGpu = cat.gpus[0].id;
       wire(); renderAll();

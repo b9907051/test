@@ -1,0 +1,57 @@
+{
+  "_readme": "第三方 GPU 租賃價格指數的來源設定。collect_indices.py 依此抓取；endpoint 欄位可直接修改而不必改程式。value 單位一律為 USD / GPU-hour。",
+  "indices": [
+    {
+      "id": "cgi",
+      "name": "Computable GPU Index (CGI)",
+      "publisher": "Computable",
+      "slot": 3,
+      "url": "https://getcomputable.com/gpu-index",
+      "access": "free",
+      "license": "資料 CC BY-NC 4.0（需標示來源、非商業用途）；程式 Apache-2.0",
+      "cadence": "每 15 分鐘一個觀測值，無固定結算時間；本站取每日最後一筆",
+      "method": "固定 29 家供應商面板的公開隨需價，去除轉售商；以「四分位間投票平均」聚合並附穩定帶，任何值皆可用開源程式重算",
+      "gpus": {"h100-sxm": "h100", "h200": "h200", "b200": "b200", "b300": "b300"},
+      "endpoint": {"flat_base": "https://data.getcomputable.com", "api_base": "https://api.getcomputable.com/v1/index"}
+    },
+    {
+      "id": "ocpi",
+      "name": "Ornn Compute Price Index (OCPI)",
+      "publisher": "Ornn",
+      "slot": 2,
+      "url": "https://data.ornn.com/preview",
+      "access": "free-tier",
+      "license": "免費層：最新結算值 + 近 3 個月日資料、5 款 GPU、無需金鑰但有 IP 速率限制；完整歷史需 API key",
+      "cadence": "每交易日結算一次；已上 Bloomberg，ICE 期貨結算參考",
+      "method": "以實際成交（資料中心與買方的議價成交）為基礎，成交量加權、winsorized 平均，並就硬體配置／供應商／部署情境做標準化",
+      "gpus": {"h100-sxm": "H100 SXM", "h200": "H200", "b200": "B200", "a100-80": "A100 SXM4", "rtx5090": "RTX 5090"},
+      "endpoint": {"api_base": "https://api.ornnai.com", "types_path": "/api/gpu-types-free", "price_paths": ["/api/ocpi", "/api/compute", "/api/prices", "/api/index"], "gpu_param": "gpuName"}
+    },
+    {
+      "id": "sdh",
+      "name": "Silicon Data Rental Index (SDH100RT 系列)",
+      "publisher": "Silicon Data",
+      "slot": 4,
+      "url": "https://www.silicondata.com/products/silicon-index",
+      "access": "paid",
+      "license": "GPU Index API 僅 Plus / Professional 訂閱者可用（OAuth2 password flow）；Bloomberg 代碼 SDH100RT / SDA100RT / SDB200RT",
+      "cadence": "每日；每次查詢最多 7 天區間",
+      "method": "每日處理 30+ 來源、約 350 萬筆觀測，輸出標準化的 USD/GPU-hour；區分 Neo-cloud 與 Hyperscaler 兩組讀數",
+      "gpus": {"h100-sxm": "h100", "a100-80": "a100", "b200": "b200"},
+      "endpoint": {"token_url": "https://api.silicondata.com/token", "index_url": "https://api.silicondata.com/gpu_index", "_note": "端點請以 https://docs.silicondata.com/api-reference/gpu_index_api 為準"}
+    },
+    {
+      "id": "gci",
+      "name": "AxonIndex GPU Compute Index (GCI)",
+      "publisher": "AxonIndex",
+      "slot": 5,
+      "url": "https://www.axonindex.com/indices/GCI",
+      "access": "manual",
+      "license": "未見公開 API；請於 data/index_manual.json 手動登錄每日定盤值",
+      "cadence": "每日 16:00 ET 定盤（對齊美股收盤），採前 24 小時觀測",
+      "method": "20+ 供應商、7 個區域；異常值篩除後以流動性（觀測到的市場深度）加權，僅有牌價的區域降權；符合 IOSCO 基準原則留存計算紀錄",
+      "gpus": {"h100-sxm": "GCI-H100", "h200": "GCI-H200", "a100-80": "GCI-A100", "b200": "GCI-B200", "b300": "GCI-B300", "rtx4090": "GCI-RTX4090", "rtx5090": "GCI-RTX5090"},
+      "endpoint": {}
+    }
+  ]
+}

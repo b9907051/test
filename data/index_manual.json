@@ -1,0 +1,5 @@
+{
+  "_readme": "手動登錄的指數值（例如 AxonIndex 網頁上的每日定盤值、或從 Bloomberg 抄錄的 SDH100RT）。欄位：date (YYYY-MM-DD)、index (cgi/ocpi/sdh/gci)、gpu (catalog id)、value (USD/GPU-hour)。collect_indices.py 會把這些併入 data/indices.json。",
+  "entries": [
+  ]
+}

@@ -90,6 +90,19 @@
     </section>
   </div>
 
+  <section class="card" id="indices">
+    <header><h2>市場基準指數比較</h2>
+      <select id="index-gpu" aria-label="選擇加速器"></select>
+    </header>
+    <div class="hint" id="index-hint" style="margin-bottom:6px"></div>
+    <div class="banner show" id="index-demo" style="display:none">⚠ 指數線目前為<strong>示範資料</strong>。執行 <code>python3 scripts/collect_indices.py</code> 後會換成 Computable、Ornn 等真實指數值。</div>
+    <div class="chart" id="index-chart"></div>
+    <ul class="legend" id="index-legend"></ul>
+    <div class="tbl" id="index-table" style="margin-top:10px"></div>
+    <div class="ixgrid" id="index-sources"></div>
+    <div class="hint" style="margin-top:8px">指數反映的是市場的「參考結算價」（Ornn 以實際成交為基礎；CGI、Silicon Data、AxonIndex 以牌價／報價觀測聚合）。本站中位數則是各供應商公開牌價，兩者的差距可當作「議價空間」的粗略指標。第三方指數值版權屬各發布者，此處僅作比較與連結，依其授權條款標示來源。</div>
+  </section>
+
   <section class="card">
     <header><h2>價格矩陣：加速器 × 供應商</h2><span class="hint">最新快照，每顆加速器每小時</span></header>
     <div class="heat" id="heatmap"></div>
