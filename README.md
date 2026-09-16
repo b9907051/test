@@ -1,5 +1,7 @@
 # AI 算力租賃價格追蹤（GPU / XPU Rental Price Tracker）
 
+> **第一次使用？** 請先看 **[使用指南.md](使用指南.md)** — 不需要任何程式基礎，照著點就能跑起來。
+
 追蹤主流 AI 加速器（NVIDIA H100 / H200 / B200 / A100 / L40S / RTX 4090 / RTX 5090、AMD MI300X / MI325X / MI355X、Intel Gaudi 3、Google TPU v5p / v6e、AWS Trainium2）在公有雲、AI 專用雲與 GPU 市集的**每顆加速器每小時租賃價格**及其變化。
 
 純靜態網頁（無框架、無第三方套件）＋ Python 收集器 ＋ GitHub Actions 每日排程，直接部署到 GitHub Pages。
