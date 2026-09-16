@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 算力租賃價格追蹤</title>
+<meta name="description" content="追蹤 NVIDIA H100/H200/B200、AMD MI300X、Google TPU、AWS Trainium 等主流 AI 加速器在各雲端與市集的每小時租賃價格變化。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M6 22l6-7 5 4 9-11' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>AI 算力租賃價格追蹤</h1>
+      <p class="sub">主流 GPU / XPU 在公有雲、AI 專用雲與 GPU 市集的每小時租賃價格（每顆加速器）</p>
+      <div class="meta" id="last-updated">載入中…</div>
+    </div>
+    <div class="tools">
+      <button class="btn" id="export-latest" type="button">匯出目前報價 CSV</button>
+      <button class="btn" id="export-all" type="button">匯出完整歷史 CSV</button>
+      <button class="btn" id="theme-toggle" type="button" aria-label="切換深淺色主題">◐ 主題</button>
+    </div>
+  </header>
+
+  <div class="banner" id="demo-banner">
+    ⚠ 目前顯示的是<strong>示範資料</strong>（合成的、僅供展示走勢形狀，非真實報價）。在有網路的環境執行 <code>python3 scripts/collect.py</code>，或啟用 GitHub Actions 排程後，會自動改為真實報價。
+  </div>
+  <div class="banner show" id="load-error" style="display:none">
+    無法載入資料檔。請透過 HTTP 伺服器開啟本頁（例如 <code>python3 -m http.server</code>），直接以 file:// 開啟時瀏覽器會擋住 fetch。<br><code></code>
+  </div>
+
+  <section class="controls" aria-label="篩選">
+    <div class="ctl"><label>計價類型</label>
+      <div class="seg" id="type-seg" role="group">
+        <button type="button" data-v="on-demand">隨需</button>
+        <button type="button" data-v="spot">競價 / 可中斷</button>
+      </div>
+    </div>
+    <div class="ctl"><label>區間</label>
+      <div class="seg" id="range-seg" role="group">
+        <button type="button" data-v="30">30 天</button>
+        <button type="button" data-v="90">90 天</button>
+        <button type="button" data-v="180">180 天</button>
+        <button type="button" data-v="365">1 年</button>
+        <button type="button" data-v="0">全部</button>
+      </div>
+    </div>
+    <div class="ctl"><label>幣別</label>
+      <div class="seg" id="cur-seg" role="group">
+        <button type="button" data-v="USD">USD</button>
+        <button type="button" data-v="TWD">TWD</button>
+      </div>
+      <input class="rate" id="twd-rate" type="number" step="0.1" min="1" aria-label="美元兌新台幣匯率" title="美元兌新台幣匯率">
+    </div>
+    <div class="ctl chips-ctl" style="flex:1 1 100%"><label>比較加速器（最多 6 款）</label><div class="chips" id="gpu-chips"></div></div>
+  </section>
+  <div id="flash" role="status" style="position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:10"></div>
+
+  <section class="kpis" aria-label="關鍵指標">
+    <div class="tile" id="kpi-index"><div class="label">AI 算力價格指數</div><div class="value">–</div><div class="delta"></div><div class="spark"></div><div class="foot"></div></div>
+    <div class="tile" id="kpi-h100"><div class="label">H100 中位數價格</div><div class="value">–</div><div class="delta"></div><div class="spark"></div><div class="foot"></div></div>
+    <div class="tile" id="kpi-h100-min"><div class="label">H100 今日最低價</div><div class="value">–</div><div class="delta"></div><div class="spark"></div><div class="foot"></div></div>
+    <div class="tile" id="kpi-mover"><div class="label">30 日變動最大</div><div class="value">–</div><div class="delta"></div><div class="spark"></div><div class="foot"></div></div>
+  </section>
+
+  <section class="card">
+    <header><h2>價格走勢（各供應商中位數）</h2><span class="hint" id="trend-hint"></span></header>
+    <div class="chart" id="trend-chart"></div>
+    <ul class="legend" id="trend-legend"></ul>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <header><h2>供應商比較</h2>
+        <select id="provider-gpu" aria-label="選擇加速器"></select>
+      </header>
+      <div class="hint" id="provider-hint" style="margin-bottom:6px"></div>
+      <div class="chart" id="provider-chart"></div>
+    </section>
+    <section class="card">
+      <header><h2>性價比</h2>
+        <div class="seg" id="value-seg" role="group">
+          <button type="button" data-v="pflop">$ / PFLOP·hr</button>
+          <button type="button" data-v="gb">$ / GB·hr</button>
+        </div>
+      </header>
+      <div class="hint" id="value-hint" style="margin-bottom:6px"></div>
+      <div class="chart" id="value-chart"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <header><h2>價格矩陣：加速器 × 供應商</h2><span class="hint">最新快照，每顆加速器每小時</span></header>
+    <div class="heat" id="heatmap"></div>
+  </section>
+
+  <section class="card">
+    <header><h2>最新報價明細</h2><span class="hint" id="table-count"></span></header>
+    <div class="tbl" id="table"></div>
+    <div class="tbl-foot"><span>點擊欄位標題排序。綠色 = 變便宜，紅色 = 變貴。</span><span>資料檔：<code>data/prices.json</code></span></div>
+  </section>
+
+  <footer class="note">
+    <strong>方法說明</strong>
+    <ul>
+      <li>價格單位為「每顆加速器每小時（USD）」；多卡機型以整機價格除以卡數。市集（Vast.ai、RunPod）取當下可租用報價中最便宜五分之一的中位數，避免單一異常報價影響。</li>
+      <li>「隨需」為不可中斷的標準計價；「競價 / 可中斷」為 Spot、Bid、Community 等可被回收的計價。未含預留折扣、承諾用量折扣與網路／儲存費用。</li>
+      <li>「AI 算力價格指數」為籃子內各加速器隨需中位數相對首個快照的幾何平均，基期 = 100。</li>
+      <li>性價比以廠商公開規格的 FP16/BF16 密集算力（不含稀疏加速）與記憶體容量換算，只是粗略比較，不代表實際訓練／推論吞吐。</li>
+      <li>資料來源：Vast.ai、RunPod、Lambda 公開 API，以及人工維護的公有雲定價頁（見 <code>data/list_prices.json</code>）。價格會隨區域、合約與庫存變動，下單前請以供應商頁面為準。</li>
+    </ul>
+  </footer>
+</div>
+<script src="assets/app.js"></script>
+</body>
+</html>

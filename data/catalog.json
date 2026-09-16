@@ -1,0 +1,36 @@
+{
+  "gpus": [
+    {"id": "h100-sxm",   "name": "NVIDIA H100 SXM",        "short": "H100",      "vendor": "NVIDIA", "kind": "GPU", "memory_gb": 80,  "fp16_tflops": 989,  "slot": 1, "aliases": {"vast": ["H100 SXM", "H100 NVL"], "runpod": ["NVIDIA H100 80GB HBM3"], "lambda": ["gpu_1x_h100_sxm5", "gpu_8x_h100_sxm5"]}},
+    {"id": "h200",       "name": "NVIDIA H200",            "short": "H200",      "vendor": "NVIDIA", "kind": "GPU", "memory_gb": 141, "fp16_tflops": 989,  "slot": 2, "aliases": {"vast": ["H200", "H200 NVL"], "runpod": ["NVIDIA H200"], "lambda": ["gpu_8x_h200_sxm5"]}},
+    {"id": "b200",       "name": "NVIDIA B200",            "short": "B200",      "vendor": "NVIDIA", "kind": "GPU", "memory_gb": 180, "fp16_tflops": 2250, "slot": 3, "aliases": {"vast": ["B200"], "runpod": ["NVIDIA B200"], "lambda": ["gpu_8x_b200_sxm6"]}},
+    {"id": "a100-80",    "name": "NVIDIA A100 80GB",       "short": "A100 80G",  "vendor": "NVIDIA", "kind": "GPU", "memory_gb": 80,  "fp16_tflops": 312,  "slot": 4, "aliases": {"vast": ["A100 SXM4", "A100 PCIE"], "runpod": ["NVIDIA A100 80GB PCIe", "NVIDIA A100-SXM4-80GB"], "lambda": ["gpu_1x_a100_sxm4", "gpu_8x_a100_80gb_sxm4"]}},
+    {"id": "mi300x",     "name": "AMD Instinct MI300X",    "short": "MI300X",    "vendor": "AMD",    "kind": "GPU", "memory_gb": 192, "fp16_tflops": 1307, "slot": 5, "aliases": {"vast": ["MI300X"], "runpod": ["AMD Instinct MI300X OAM"], "lambda": []}},
+    {"id": "l40s",       "name": "NVIDIA L40S",            "short": "L40S",      "vendor": "NVIDIA", "kind": "GPU", "memory_gb": 48,  "fp16_tflops": 362,  "slot": 6, "aliases": {"vast": ["L40S"], "runpod": ["NVIDIA L40S"], "lambda": []}},
+    {"id": "rtx4090",    "name": "NVIDIA RTX 4090",        "short": "RTX 4090",  "vendor": "NVIDIA", "kind": "GPU", "memory_gb": 24,  "fp16_tflops": 165,  "slot": 7, "aliases": {"vast": ["RTX 4090"], "runpod": ["NVIDIA GeForce RTX 4090"], "lambda": []}},
+    {"id": "tpu-v6e",    "name": "Google TPU v6e (Trillium)", "short": "TPU v6e", "vendor": "Google", "kind": "XPU", "memory_gb": 32,  "fp16_tflops": 918,  "slot": 8, "aliases": {}},
+    {"id": "mi325x",     "name": "AMD Instinct MI325X",    "short": "MI325X",    "vendor": "AMD",    "kind": "GPU", "memory_gb": 256, "fp16_tflops": 1307, "slot": 1, "aliases": {"vast": ["MI325X"], "runpod": [], "lambda": []}},
+    {"id": "mi355x",     "name": "AMD Instinct MI355X",    "short": "MI355X",    "vendor": "AMD",    "kind": "GPU", "memory_gb": 288, "fp16_tflops": 2300, "slot": 2, "aliases": {"vast": ["MI355X"], "runpod": [], "lambda": []}},
+    {"id": "gaudi3",     "name": "Intel Gaudi 3",          "short": "Gaudi 3",   "vendor": "Intel",  "kind": "XPU", "memory_gb": 128, "fp16_tflops": 1835, "slot": 3, "aliases": {}},
+    {"id": "trainium2",  "name": "AWS Trainium2",          "short": "Trn2",      "vendor": "AWS",    "kind": "XPU", "memory_gb": 96,  "fp16_tflops": 667,  "slot": 4, "aliases": {}},
+    {"id": "tpu-v5p",    "name": "Google TPU v5p",         "short": "TPU v5p",   "vendor": "Google", "kind": "XPU", "memory_gb": 95,  "fp16_tflops": 459,  "slot": 5, "aliases": {}},
+    {"id": "rtx5090",    "name": "NVIDIA RTX 5090",        "short": "RTX 5090",  "vendor": "NVIDIA", "kind": "GPU", "memory_gb": 32,  "fp16_tflops": 209,  "slot": 6, "aliases": {"vast": ["RTX 5090"], "runpod": ["NVIDIA GeForce RTX 5090"], "lambda": []}}
+  ],
+  "providers": [
+    {"id": "aws",        "name": "AWS",            "tier": "hyperscaler", "url": "https://aws.amazon.com/ec2/pricing/on-demand/"},
+    {"id": "gcp",        "name": "Google Cloud",   "tier": "hyperscaler", "url": "https://cloud.google.com/compute/gpus-pricing"},
+    {"id": "azure",      "name": "Microsoft Azure","tier": "hyperscaler", "url": "https://azure.microsoft.com/pricing/details/virtual-machines/linux/"},
+    {"id": "oci",        "name": "Oracle OCI",     "tier": "hyperscaler", "url": "https://www.oracle.com/cloud/compute/gpu/"},
+    {"id": "coreweave",  "name": "CoreWeave",      "tier": "neocloud",    "url": "https://www.coreweave.com/pricing"},
+    {"id": "lambda",     "name": "Lambda",         "tier": "neocloud",    "url": "https://lambda.ai/pricing"},
+    {"id": "nebius",     "name": "Nebius",         "tier": "neocloud",    "url": "https://nebius.com/prices"},
+    {"id": "crusoe",     "name": "Crusoe",         "tier": "neocloud",    "url": "https://crusoe.ai/cloud/pricing"},
+    {"id": "together",   "name": "Together AI",    "tier": "neocloud",    "url": "https://www.together.ai/pricing"},
+    {"id": "runpod",     "name": "RunPod",         "tier": "marketplace", "url": "https://www.runpod.io/pricing"},
+    {"id": "vast",       "name": "Vast.ai",        "tier": "marketplace", "url": "https://vast.ai/pricing"},
+    {"id": "hyperbolic", "name": "Hyperbolic",     "tier": "marketplace", "url": "https://hyperbolic.xyz/pricing"}
+  ],
+  "price_types": [
+    {"id": "on-demand", "name": "隨需 (On-demand)"},
+    {"id": "spot",      "name": "競價 / 可中斷 (Spot)"}
+  ]
+}
