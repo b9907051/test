@@ -25,7 +25,7 @@
       "cadence": "每交易日結算一次；已上 Bloomberg，ICE 期貨結算參考",
       "method": "以實際成交（資料中心與買方的議價成交）為基礎，成交量加權、winsorized 平均，並就硬體配置／供應商／部署情境做標準化",
       "gpus": {"h100-sxm": "H100 SXM", "h200": "H200", "b200": "B200", "a100-80": "A100 SXM4", "rtx5090": "RTX 5090"},
-      "endpoint": {"api_base": "https://api.ornnai.com", "types_path": "/api/gpu-types-free", "price_paths": ["/api/ocpi", "/api/compute", "/api/prices", "/api/index"], "gpu_param": "gpuName"}
+      "endpoint": {"api_base": "https://api.ornnai.com", "types_path": "/api/gpu-types-free", "price_paths": ["/api/ocpi", "/api/compute", "/api/compute/history", "/api/prices", "/api/index", "/api/gpu-prices"], "gpu_param": "gpu_name"}
     },
     {
       "id": "sdh",

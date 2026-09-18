@@ -170,6 +170,8 @@
       });
       const p = svgEl("path", { d, style: `stroke:${s.color}` }, gs);
       if (s.dashed) p.setAttribute("stroke-dasharray", "6 4");
+      const nPts = s.values.filter((v) => v != null).length;
+      if (nPts === 1 && lastPt) svgEl("circle", { cx: lastPt.px, cy: lastPt.py, r: 4, style: `fill:${s.color}` }, gs);
       if (lastPt) labels.push({ s, ...lastPt });
     }
     // end labels with simple collision avoidance

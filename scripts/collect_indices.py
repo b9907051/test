@@ -73,14 +73,17 @@ def extract_points(doc, default_date=None):
 def collect_cgi(days):
     src = SOURCES["cgi"]; base = src["endpoint"]["flat_base"].rstrip("/")
     latest = http_json(f"{base}/latest.json")
-    versions = latest.get("data", {}).get("versions", [])
+    # find every dict that names a SKU, wherever it sits in the document
+    entries = [d for d in walk(latest) if isinstance(d.get("sku") or d.get("gpu") or d.get("model"), str)]
+    if not entries:
+        print(f"  [cgi] no sku entries found; latest.json top-level keys={list(latest)[:8]} head={json.dumps(latest)[:400]}", file=sys.stderr)
     out = []
     today = dt.date.today()
     for gpu_id, sku in src["gpus"].items():
-        entry = next((v for v in versions if v.get("sku") == sku), None)
+        entry = next((v for v in entries if str(v.get("sku") or v.get("gpu") or v.get("model")).lower() == sku), None)
         if not entry:
-            print(f"  [cgi] sku {sku} not in latest.json", file=sys.stderr); continue
-        prefix = entry.get("history_path") or f"{sku}/v{entry.get('current_version')}"
+            print(f"  [cgi] sku {sku} not in latest.json (have: {sorted({str(v.get('sku') or v.get('gpu') or v.get('model')) for v in entries})[:12]})", file=sys.stderr); continue
+        prefix = entry.get("history_path") or entry.get("path") or f"{sku}/v{entry.get('current_version') or entry.get('version') or 1}"
         got = 0
         for i in range(days):
             day = today - dt.timedelta(days=i)
@@ -103,7 +106,8 @@ def collect_ocpi(days):
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     try:
         types = http_json(base + ep["types_path"], headers=headers)
-        names = {str(x.get("gpuName") or x.get("name") or x.get("id") or x) for x in (types if isinstance(types, list) else types.get("data", types.get("gpuTypes", [])))}
+        items = types if isinstance(types, list) else types.get("data", types.get("gpuTypes", types.get("gpu_types", [])))
+        names = {str((x.get("gpu_name") or x.get("gpuName") or x.get("name") or x.get("id")) if isinstance(x, dict) else x) for x in items}
         print(f"  [ocpi] free-tier GPUs: {sorted(names)}")
     except Exception as e:  # noqa: BLE001
         names = set(); print(f"  [ocpi] gpu-types-free failed: {e}", file=sys.stderr)
@@ -112,18 +116,23 @@ def collect_ocpi(days):
     for gpu_id, gpu_name in src["gpus"].items():
         if names and gpu_name not in names and not key:
             continue
-        q = urllib.parse.urlencode({ep.get("gpu_param", "gpuName"): gpu_name, "startDate": start.isoformat(), "endDate": end.isoformat()})
-        pts = None
-        for path in ep["price_paths"]:
-            try:
-                pts = extract_points(http_json(f"{base}{path}?{q}", headers=headers))
+        pts = None; tried = []
+        for param in dict.fromkeys([ep.get("gpu_param", "gpu_name"), "gpu_name", "gpuName"]):
+            for path in ep["price_paths"]:
+                q = urllib.parse.urlencode({param: gpu_name, "startDate": start.isoformat(), "endDate": end.isoformat()})
+                url = f"{base}{path}?{q}"; tried.append(url)
+                try:
+                    doc = http_json(url, headers=headers)
+                except urllib.error.HTTPError as e:
+                    if e.code in (400, 404, 405, 422): continue
+                    raise
+                pts = extract_points(doc)
                 if pts:
-                    print(f"  [ocpi] {gpu_name}: {len(pts)} days via {path}"); break
-            except urllib.error.HTTPError as e:
-                if e.code in (404, 405): continue
-                raise
+                    print(f"  [ocpi] {gpu_name}: {len(pts)} days via {path}?{param}="); break
+                print(f"  [ocpi] {gpu_name}: {path} answered but no (date,value) pairs found; head={json.dumps(doc)[:300]}", file=sys.stderr)
+            if pts: break
         if not pts:
-            print(f"  [ocpi] {gpu_name}: no data on any configured path – check data.ornn.com/docs and update price_paths", file=sys.stderr); continue
+            print(f"  [ocpi] {gpu_name}: no data. tried: {tried[:3]} ... – check data.ornn.com/docs and update price_paths", file=sys.stderr); continue
         out += [(d, "ocpi", gpu_id, v) for d, v in pts.items()]
     return out
 

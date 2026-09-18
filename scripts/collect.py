@@ -65,8 +65,10 @@ def collect_vast() -> list[tuple[str, str, str, float]]:
                 print(f"  [vast] {vast_name}/{vtype}: {e}", file=sys.stderr)
                 continue
             key = "min_bid" if vtype == "bid" else "dph_total"
-            price = robust_price([o.get(key) or o.get("dph_total") for o in res.get("offers", [])])
+            offers = [o.get(key) or o.get("dph_total") for o in res.get("offers", [])]
+            price = robust_price(sorted(v for v in offers if isinstance(v, (int, float))))
             if price:
+                print(f"  [vast] {vast_name}/{ptype}: {price} (from {len(offers)} offers, min {min(offers) if offers else '-'})")
                 out.append((gpu_id, ptype, "vast", price))
     return out
 
@@ -86,9 +88,11 @@ def collect_runpod():
         lp = gt.get("lowestPrice") or {}
         od = lp.get("uninterruptablePrice") or gt.get("securePrice") or gt.get("communityPrice")
         spot = lp.get("minimumBidPrice")
+        print(f"  [runpod] {gt.get('id')}: secure={gt.get('securePrice')} community={gt.get('communityPrice')} lowest={lp}")
         if od:
             out.append((gpu_id, "on-demand", "runpod", round(float(od), 3)))
-        if spot:
+        # minimumBidPrice equal to the on-demand price carries no spot information (no bid market open)
+        if spot and od and abs(float(spot) - float(od)) > 1e-6:
             out.append((gpu_id, "spot", "runpod", round(float(spot), 3)))
     return out
 
