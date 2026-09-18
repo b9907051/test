@@ -18,6 +18,8 @@
     providerGpu: "h100-sxm",
     valueMetric: "pflop",
     sort: { key: "usd", dir: 1 },
+    tokenModels: new Set(["claude-sonnet-5", "gpt-5-6-terra", "gemini-3-8-flash", "deepseek-v4-pro", "claude-opus-5", "grok-4-6"]),
+    tokenMetric: "blend",
   };
   try {
     const saved = JSON.parse(localStorage.getItem("aipt-state") || "{}");
@@ -28,12 +30,15 @@
     if (saved.twdRate) state.twdRate = saved.twdRate;
     if (saved.providerGpu) state.providerGpu = saved.providerGpu;
     if (saved.indexGpu) state.indexGpu = saved.indexGpu;
+    if (saved.tokenModels) state.tokenModels = new Set(saved.tokenModels);
+    if (saved.tokenMetric) state.tokenMetric = saved.tokenMetric;
   } catch (_) { /* storage unavailable: defaults are fine */ }
   const persist = () => {
     try {
       localStorage.setItem("aipt-state", JSON.stringify({
         type: state.type, rangeDays: state.rangeDays, gpus: [...state.gpus],
         currency: state.currency, twdRate: state.twdRate, providerGpu: state.providerGpu, indexGpu: state.indexGpu,
+        tokenModels: [...state.tokenModels], tokenMetric: state.tokenMetric,
       }));
     } catch (_) { /* ignore */ }
   };
@@ -41,6 +46,7 @@
   let CAT, GPU, PROV, ROWS, DATES, LATEST;
   let IXSRC = {}, IXROWS = [], IXMETA = {};            // third-party indices
   const IXIDX = new Map();                             // `${index}|${gpu}` -> [{t,d,v,src}] sorted
+  let TK = null, TKPRICE = new Map(), TKOTPI = new Map(), TKUSE = [], TKMETA = {};   // token economics
   // index: `${gpu}|${type}` -> Map(provider -> [{t, d, usd, src}] sorted by t)
   const IDX = new Map();
 
@@ -148,7 +154,8 @@
     const months = []; let lastKey = "";
     for (const d of dates) { const k = d.slice(0, 7); if (k !== lastKey) { months.push(d); lastKey = k; } }
     const every = Math.max(1, Math.ceil(months.length / Math.max(2, Math.floor(pw / 70))));
-    months.forEach((d, i) => { if (i % every === 0) svgEl("text", { x: x(toT(d)), y: H - 8, "text-anchor": "middle" }, tk).textContent = fmtShortDate(toT(d)); });
+    let lastTickX = -Infinity;
+    months.forEach((d, i) => { const px = x(toT(d)); if (i % every === 0 && px - lastTickX >= 60) { svgEl("text", { x: px, y: H - 8, "text-anchor": "middle" }, tk).textContent = fmtShortDate(toT(d)); lastTickX = px; } });
 
     const gs = svgEl("g", { class: "series" }, svg);
     const labels = [];
@@ -157,7 +164,9 @@
       s.values.forEach((v, i) => {
         if (v == null) { pen = false; return; }
         const px = x(toT(dates[i])), py = y(v);
-        d += (pen ? "L" : "M") + px.toFixed(1) + " " + py.toFixed(1); pen = true; lastPt = { px, py, v };
+        if (pen && opts.step && lastPt) d += "H" + px.toFixed(1) + "V" + py.toFixed(1);
+        else d += (pen ? "L" : "M") + px.toFixed(1) + " " + py.toFixed(1);
+        pen = true; lastPt = { px, py, v };
       });
       const p = svgEl("path", { d, style: `stroke:${s.color}` }, gs);
       if (s.dashed) p.setAttribute("stroke-dasharray", "6 4");
@@ -511,8 +520,107 @@
     $("#index-demo").style.display = IXMETA.demo ? "" : "none";
   }
 
+  // ------------------------------------------------------------ token economics
+  const fmtTok = (n) => n == null ? "–" : n >= 1e15 ? (n / 1e15).toFixed(2) + " Q" : n >= 1e12 ? (n / 1e12).toFixed(1) + " T" : n >= 1e9 ? (n / 1e9).toFixed(1) + " B" : n.toLocaleString();
+  const fmtPerM = (v) => v == null ? "–" : fmtMoney(v, v >= 10 ? 2 : v >= 1 ? 2 : 3);
+  const vendorOf = (id) => TK.vendors.find((v) => v.id === (TK.models.find((m) => m.id === id) || {}).vendor) || TK.vendors[TK.vendors.length - 1];
+  const blendOf = (r) => (TK.blend.input * r.i + TK.blend.output * r.o) / (TK.blend.input + TK.blend.output);
+  const metricOf = (r) => state.tokenMetric === "in" ? r.i : state.tokenMetric === "out" ? r.o : blendOf(r);
+  function tkAt(model, t) { const list = TKPRICE.get(model); if (!list) return null; const p = priceAt(list, t); return p && t - p.t <= 400 * DAY ? p : null; }
+  function tokenSeriesStyle() {
+    const used = new Map(), out = new Map();
+    for (const m of TK.models) {
+      if (!state.tokenModels.has(m.id)) continue;
+      const v = vendorOf(m.id), dashed = used.has(v.slot); used.set(v.slot, true);
+      out.set(m.id, { color: SLOT_VAR(v.slot), dashed });
+    }
+    return out;
+  }
+  function renderTokens() {
+    if (!TK) return;
+    const t = Math.max(latestT(), ...[...TKPRICE.values()].flat().map((r) => r.t));
+    // ---- chips
+    const chips = $("#token-chips"); chips.innerHTML = "";
+    for (const m of TK.models) {
+      const v = vendorOf(m.id), b = document.createElement("button");
+      b.className = "chip"; b.type = "button"; b.style.setProperty("--c", SLOT_VAR(v.slot)); b.setAttribute("aria-pressed", state.tokenModels.has(m.id));
+      const last = tkAt(m.id, t); b.title = last ? `${m.name} · 輸入 ${fmtPerM(last.i)} / 輸出 ${fmtPerM(last.o)} 每百萬 token` : m.name;
+      b.innerHTML = `<span class="sw"></span>${m.name}<span class="kind">${TK.tiers[m.tier] || m.tier}</span>`;
+      b.addEventListener("click", () => { if (state.tokenModels.has(m.id)) state.tokenModels.delete(m.id); else if (state.tokenModels.size >= 6) { flash("最多同時比較 6 個模型"); return; } else state.tokenModels.add(m.id); persist(); renderTokens(); });
+      chips.appendChild(b);
+    }
+    $$("#token-metric button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === state.tokenMetric));
+    // ---- price chart (step lines: list prices change in jumps)
+    const tkDates = [...new Set([...TKPRICE.values()].flat().map((r) => r.d))].sort();
+    const from = state.rangeDays ? t - state.rangeDays * DAY : -Infinity;
+    const axis = [...new Set([...tkDates, ...DATES])].filter((d) => toT(d) >= from && toT(d) <= t).sort();
+    const styles = tokenSeriesStyle();
+    const series = TK.models.filter((m) => state.tokenModels.has(m.id)).map((m) => ({ id: m.id, name: m.name, ...styles.get(m.id), hidden: state.hidden.has("tk:" + m.id),
+      values: axis.map((d) => { const p = tkAt(m.id, toT(d)); return p ? metricOf(p) : null; }) }));
+    const mName = { in: "輸入", out: "輸出", blend: `混合（${TK.blend.input}:${TK.blend.output}）` }[state.tokenMetric];
+    lineChart($("#token-chart"), axis, series, { step: true, height: 300, rightPad: 150, fmtY: (v, exact) => exact ? fmtPerM(v) : fmtMoney(v, v >= 10 ? 0 : 1), aria: "各模型每百萬 token 牌價走勢" });
+    const lg = $("#token-legend"); lg.innerHTML = "";
+    for (const sr of series) { const li = document.createElement("li"); li.style.setProperty("--c", sr.color); li.className = (sr.dashed ? "dashed " : "") + (sr.hidden ? "off" : ""); li.innerHTML = `<span class="sw"></span>${sr.name}`; li.addEventListener("click", () => { const k = "tk:" + sr.id; state.hidden.has(k) ? state.hidden.delete(k) : state.hidden.add(k); renderTokens(); }); lg.appendChild(li); }
+    $("#token-hint").textContent = `每百萬 token 的${mName}牌價（USD）。牌價是階梯狀變動，圖上每一階代表一次調價；同廠商第二個模型以虛線表示。`;
+    // ---- KPIs
+    const frontier = TK.models.filter((m) => m.tier === "frontier").map((m) => tkAt(m.id, t)).filter(Boolean).map((p) => p.o);
+    const frontierThen = TK.models.filter((m) => m.tier === "frontier").map((m) => tkAt(m.id, t - 30 * DAY)).filter(Boolean).map((p) => p.o);
+    const fm = median(frontier), fmThen = median(frontierThen);
+    $("#tk-frontier .value").innerHTML = fm != null ? fmtPerM(fm) + `<span class="unit">/M 輸出</span>` : "–";
+    setDelta($("#tk-frontier .delta"), fm && fmThen ? fm / fmThen - 1 : null, "30日");
+    $("#tk-frontier .foot").textContent = `旗艦級模型（${TK.models.filter((m) => m.tier === "frontier").map((m) => m.name).join("、")}）輸出價中位數`;
+    const totals = TKUSE.filter((r) => r.scope === "openrouter_total").sort((a, b) => a.t - b.t);
+    const lastTot = totals[totals.length - 1], prevTot = totals.length > 1 ? totals[totals.length - 2] : null;
+    $("#tk-usage .value").innerHTML = lastTot ? fmtTok(lastTot.n) + `<span class="unit">/週</span>` : "–";
+    setDeltaUp($("#tk-usage .delta"), lastTot && prevTot ? lastTot.n / prevTot.n - 1 : null, "週增");
+    sparkline($("#tk-usage .spark"), totals.slice(-26).map((r) => r.n), "var(--s3)");
+    $("#tk-usage .foot").textContent = lastTot ? `OpenRouter 平台全部模型 · 截至 ${lastTot.d}${lastTot.src === "demo" ? "（示範）" : ""}` : "尚無 OpenRouter 用量資料";
+    const ref = tkAt("claude-sonnet-5", t), h100 = medianAt("h100-sxm", "on-demand", t);
+    $("#tk-bridge .value").innerHTML = ref && h100 ? (h100 / blendOf(ref)).toFixed(2) + `<span class="unit">百萬 token</span>` : "–";
+    $("#tk-bridge .delta").textContent = ref && h100 ? `H100 ${fmtMoney(h100)}/hr ÷ Sonnet 5 混合價 ${fmtPerM(blendOf(ref))}/M` : ""; $("#tk-bridge .delta").className = "delta";
+    $("#tk-bridge .foot").textContent = "把租一顆 H100 一小時的錢，拿去買 Claude Sonnet 5 的 token 可以買多少。這是算力側與 token 側價格的橋接指標，不代表 H100 實際能產出的 token 數。";
+    // ---- price table
+    const rowsT = TK.models.map((m) => { const p = tkAt(m.id, t); if (!p) return null; const then = tkAt(m.id, t - 30 * DAY); return { m, p, then, v: vendorOf(m.id) }; }).filter(Boolean).sort((a, b) => blendOf(a.p) - blendOf(b.p));
+    let html = `<table class="data"><thead><tr><th>模型</th><th>廠商</th><th>等級</th><th class="num">輸入 $/M</th><th class="num">輸出 $/M</th><th class="num">快取輸入</th><th class="num">混合價</th><th class="num">30 日</th><th>來源 / 日期</th></tr></thead><tbody>`;
+    for (const r of rowsT) { const ch = r.then ? blendOf(r.p) / blendOf(r.then) - 1 : null; html += `<tr><td><span class="sw" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${SLOT_VAR(r.v.slot)};margin-right:6px;vertical-align:middle"></span>${r.m.name}</td><td>${r.v.name}</td><td>${TK.tiers[r.m.tier] || r.m.tier}</td><td class="num">${fmtPerM(r.p.i)}</td><td class="num">${fmtPerM(r.p.o)}</td><td class="num">${r.p.c == null ? "–" : fmtPerM(r.p.c)}</td><td class="num"><b>${fmtPerM(blendOf(r.p))}</b></td><td class="num ${cls(ch)}">${fmtPct(ch)}</td><td class="src">${r.p.src} · ${r.p.d}</td></tr>`; }
+    $("#token-table").innerHTML = html + "</tbody></table>";
+    // ---- usage: top models (latest week) + weekly total
+    const weeks = [...new Set(TKUSE.filter((r) => r.scope === "openrouter_model").map((r) => r.d))].sort();
+    const lastWeek = weeks[weeks.length - 1], prevWeek = weeks[weeks.length - 2];
+    const top = TKUSE.filter((r) => r.scope === "openrouter_model" && r.d === lastWeek).sort((a, b) => b.n - a.n).slice(0, 15);
+    hbarChart($("#usage-chart"), top.map((r) => { const prev = TKUSE.find((q) => q.scope === "openrouter_model" && q.d === prevWeek && q.key === r.key); const ch = prev ? r.n / prev.n - 1 : null;
+      return { label: r.key.split("/").pop(), value: r.n, valueLabel: fmtTok(r.n), color: "var(--accent)", tip: `<div class="t">${r.key}</div><div class="row">本週 token<span class="v">${fmtTok(r.n)}</span></div><div class="row">週增<span class="v">${fmtPct(ch)}</span></div><div class="row">佔平台<span class="v">${lastTot ? (r.n / lastTot.n * 100).toFixed(1) + "%" : "–"}</span></div>` }; }).map((it) => ({ ...it, emphasis: false })), { labelW: 150 });
+    $("#usage-hint").textContent = lastWeek ? `OpenRouter 上一週用量最高的 15 個模型（截至 ${lastWeek}），輸入＋輸出 token 合計。T = 兆（10¹²）。` : "尚無資料";
+    const tAxis = totals.map((r) => r.d).filter((d) => toT(d) >= from);
+    lineChart($("#usage-total-chart"), tAxis, [{ id: "tot", name: "週 token 量", color: "var(--s3)", values: tAxis.map((d) => (totals.find((r) => r.d === d) || {}).n ?? null) }], { height: 220, rightPad: 90, fmtY: (v) => fmtTok(v), aria: "OpenRouter 每週 token 總量" });
+    // ---- industry totals table
+    const ind = TKUSE.filter((r) => r.scope === "industry").sort((a, b) => a.t - b.t);
+    const byOrg = new Map(); for (const r of ind) { if (!byOrg.has(r.key)) byOrg.set(r.key, []); byOrg.get(r.key).push(r); }
+    let ih = `<table class="data"><thead><tr><th>組織</th><th class="num">每月 token</th><th>揭露日期</th><th class="num">較上次揭露</th><th class="num">年化成長</th><th>來源</th></tr></thead><tbody>`;
+    for (const [org, list] of [...byOrg.entries()].sort((a, b) => b[1][b[1].length - 1].n - a[1][a[1].length - 1].n)) {
+      const last = list[list.length - 1], prev = list.length > 1 ? list[list.length - 2] : null;
+      const yrs = prev ? (last.t - prev.t) / (365 * DAY) : null, cagr = prev && yrs > 0 ? Math.pow(last.n / prev.n, 1 / yrs) - 1 : null;
+      ih += `<tr><td>${last.name || org}</td><td class="num"><b>${fmtTok(last.n)}</b></td><td class="src">${last.d}${last.note ? " · " + last.note : ""}</td><td class="num">${prev ? (last.n / prev.n).toFixed(1) + "×" : "–"}</td><td class="num">${cagr == null ? "–" : (cagr * 100).toFixed(0) + "%"}</td><td class="src">${last.url ? `<a href="${last.url}" target="_blank" rel="noopener">連結</a>` : "–"}</td></tr>`;
+    }
+    $("#industry-table").innerHTML = ih + "</tbody></table>";
+    // ---- OTPI realized cost per lab
+    let oh = "";
+    const labs = TK.labs.filter((l) => TKOTPI.has(l.id));
+    if (labs.length) {
+      oh = `<table class="data"><thead><tr><th>實驗室</th><th class="num">實際成交價 $/M</th><th>日期</th><th class="num">7 日</th><th class="num">30 日</th></tr></thead><tbody>`;
+      for (const l of labs) { const list = TKOTPI.get(l.id), last = list[list.length - 1]; const at = (days) => { const p = priceAt(list, last.t - days * DAY); return p ? last.v / p.v - 1 : null; };
+        oh += `<tr><td>${l.name}</td><td class="num"><b>${fmtPerM(last.v)}</b></td><td class="src">${last.d}${last.src === "demo" ? "（示範）" : ""}</td><td class="num ${cls(at(7))}">${fmtPct(at(7))}</td><td class="num ${cls(at(30))}">${fmtPct(at(30))}</td></tr>`; }
+      oh += "</tbody></table>";
+    } else oh = `<div class="hint">尚無 Ornn OTPI 資料。執行 <code>scripts/collect_tokens.py</code> 後會出現。</div>`;
+    $("#otpi-table").innerHTML = oh;
+    $("#token-demo").style.display = (TKMETA.pricesDemo || TKMETA.usageDemo) ? "" : "none";
+  }
+  function setDeltaUp(el, pct, label) {   // for volumes: up is neutral-good, shown in ink
+    el.textContent = pct == null ? "–" : `${pct >= 0 ? "▲" : "▼"} ${fmtPct(Math.abs(pct))} ${label}`; el.className = "delta";
+  }
+
   function renderAll() {
-    renderHeader(); renderControls(); renderKpis(); renderTrend(); renderProviders(); renderHeatmap(); renderValue(); renderTable(); renderIndices();
+    renderHeader(); renderControls(); renderKpis(); renderTrend(); renderProviders(); renderHeatmap(); renderValue(); renderTable(); renderIndices(); renderTokens();
   }
 
   // ------------------------------------------------------------ wiring
@@ -524,6 +632,7 @@
     $("#provider-gpu").addEventListener("change", (e) => { state.providerGpu = e.target.value; persist(); renderProviders(); });
     $("#value-seg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.valueMetric = b.dataset.v; renderControls(); renderValue(); });
     $("#index-gpu").addEventListener("change", (e) => { state.indexGpu = e.target.value; persist(); renderIndices(); });
+    $("#token-metric").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.tokenMetric = b.dataset.v; persist(); renderTokens(); });
     $("#export-latest").addEventListener("click", () => exportCsv(false));
     $("#export-all").addEventListener("click", () => exportCsv(true));
     $("#theme-toggle").addEventListener("click", () => {
@@ -534,7 +643,7 @@
       renderHeatmap();
     });
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderHeatmap());
-    let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { renderTrend(); renderProviders(); renderValue(); renderIndices(); }, 120); }).observe($("#trend-chart"));
+    let rt; new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { renderTrend(); renderProviders(); renderValue(); renderIndices(); renderTokens(); }, 120); }).observe($("#trend-chart"));
   }
 
   async function load() {
@@ -544,6 +653,21 @@
         fetch("data/index_sources.json").then((r) => r.json()).catch(() => ({ indices: [] })),
         fetch("data/indices.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [] })),
       ]);
+      const [tkcat, tkp, tku] = await Promise.all([
+        fetch("data/token_catalog.json").then((r) => r.json()).catch(() => null),
+        fetch("data/token_prices.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [], otpi: [] })),
+        fetch("data/token_usage.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [] })),
+      ]);
+      if (tkcat) {
+        TK = tkcat;
+        for (const r of tkp.rows || []) { if (!TK.models.some((m) => m.id === r[1])) continue; if (!TKPRICE.has(r[1])) TKPRICE.set(r[1], []); TKPRICE.get(r[1]).push({ d: r[0], t: toT(r[0]), i: +r[2], o: +r[3], c: r[4] == null ? null : +r[4], src: r[5], usd: +r[3] }); }
+        for (const l of TKPRICE.values()) l.sort((a, b) => a.t - b.t);
+        for (const r of tkp.otpi || []) { if (!TKOTPI.has(r[1])) TKOTPI.set(r[1], []); TKOTPI.get(r[1]).push({ d: r[0], t: toT(r[0]), v: +r[2], usd: +r[2], src: r[3] }); }
+        for (const l of TKOTPI.values()) l.sort((a, b) => a.t - b.t);
+        TKUSE = (tku.rows || []).map((r) => ({ d: r[0], t: toT(r[0]), scope: r[1], key: r[2], n: +r[3], src: r[4], name: r[5], url: r[6], note: r[7] }));
+        TKMETA = { pricesDemo: !!(tkp.meta || {}).demo, usageDemo: !!(tku.meta || {}).demo };
+        for (const id of [...state.tokenModels]) if (!TK.models.some((m) => m.id === id)) state.tokenModels.delete(id);
+      } else { $("#tokens").style.display = "none"; }
       CAT = cat; GPU = Object.fromEntries(cat.gpus.map((g) => [g.id, g])); PROV = Object.fromEntries(cat.providers.map((p) => [p.id, p]));
       ROWS = prices.rows.filter((r) => GPU[r[2]] && PROV[r[1]]).map((r) => ({ d: r[0], t: toT(r[0]), provider: r[1], gpu: r[2], type: r[3], usd: +r[4], src: r[5] }));
       ROWS.meta = prices.meta || {};

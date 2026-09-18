@@ -34,6 +34,25 @@ python3 scripts/collect_indices.py --only cgi --days 30 --dry-run
 
 端點與 GPU 名稱對應都在 `data/index_sources.json`，若對方 API 路徑調整，改設定即可。第一次在有網路的環境執行前，這些 adapter 尚未經真實 API 驗證；若某來源失敗，log 會指出是哪個路徑，請對照對方文件修改設定。
 
+## Token 經濟（模型牌價與市場用量）
+
+「Token 經濟」區塊把算力的「產出側」也納入追蹤：
+
+| 資料 | 內容 | 來源 | 收集器 |
+|---|---|---|---|
+| 模型牌價 | 14 個主流模型（Anthropic / OpenAI / Google / DeepSeek / xAI）每百萬 token 的輸入、輸出、快取價，步階走勢圖 | OpenRouter `/api/v1/models`（公開、無金鑰）＋ `data/token_manual.json` 官方定價抄錄 | `openrouter_prices`、`manual` |
+| 平台用量 | OpenRouter 每週 token 總量、Top 15 模型用量與週增率 | OpenRouter Data API（需免費 API key，資料 CC BY 4.0） | `openrouter_usage` |
+| 實際成交價 | Ornn OTPI：各實驗室以成交量加權的 $/M token | Ornn 免費層（近一個月、4 家實驗室） | `ornn_otpi` |
+| 產業總量 | Google、Microsoft、Together AI、OpenRouter 公開揭露的每月 token 處理量 | 人工登錄（附來源連結） | `manual` |
+| 橋接指標 | 「一小時 H100 租金 ≈ 多少百萬 Sonnet 5 token」 | 由本站 H100 中位數與牌價計算 | — |
+
+```bash
+python3 scripts/collect_tokens.py                       # openrouter_prices + ornn_otpi + manual（免金鑰）
+OPENROUTER_API_KEY=sk-or-... python3 scripts/collect_tokens.py --only openrouter_usage
+```
+
+新增模型：在 `data/token_catalog.json` 的 `models` 加一列（含 OpenRouter id）。官方調價時，在 `data/token_manual.json` 的 `prices` 加一筆並填 `verified_on`。
+
 ## 目錄結構
 
 ```
@@ -46,6 +65,12 @@ data/index_sources.json  第三方指數來源設定（端點、GPU 對應、授
 data/indices.json        指數歷史：rows = [date, index, gpu, value, source]
 data/index_manual.json   人工登錄的指數值（AxonIndex 等）
 scripts/collect_indices.py 收集第三方指數
+data/token_catalog.json  追蹤的 LLM 模型與廠商
+data/token_prices.json   模型牌價歷史 + Ornn OTPI（程式自動寫）
+data/token_usage.json    OpenRouter 用量 + 產業總量（程式自動寫）
+data/token_manual.json   人工登錄：官方牌價、產業揭露數字
+scripts/collect_tokens.py 收集 token 牌價與用量
+scripts/seed_demo_tokens.py 產生示範 token 資料
 scripts/seed_demo_indices.py 產生示範指數資料
 scripts/collect.py       收集今日報價並寫入 prices.json
 scripts/seed_demo_data.py 產生示範資料（合成，非真實報價）
@@ -82,7 +107,7 @@ python3 scripts/collect.py --only vast,list --dry-run   # 只跑部分來源、�
 ## 部署到 GitHub Pages
 
 1. Repo → Settings → Pages → Source 選 **GitHub Actions**。
-2. （選填）Settings → Secrets 加入 `RUNPOD_API_KEY`、`LAMBDA_API_KEY`；指數來源可加 `ORNN_API_KEY`（完整歷史）、`SILICONDATA_USERNAME` / `SILICONDATA_PASSWORD`（付費 API）。
+2. （選填）Settings → Secrets 加入 `RUNPOD_API_KEY`、`LAMBDA_API_KEY`；指數來源可加 `ORNN_API_KEY`（完整歷史）、`SILICONDATA_USERNAME` / `SILICONDATA_PASSWORD`（付費 API）；token 用量需要 `OPENROUTER_API_KEY`（免費註冊即可取得）。
 3. 合併到 `main` 後 workflow 會在每次 push 與每日 03:17 UTC 執行：收集 → commit `data/prices.json` → 部署。
    也可在 Actions 頁手動 `Run workflow`。
 

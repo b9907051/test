@@ -1,0 +1,33 @@
+{
+  "_readme": "追蹤的 LLM 模型清單。slot 依「廠商」固定配色（同廠商第二個以上模型以虛線區分）。openrouter 為 OpenRouter 上的模型 id，用來自動抓牌價。price_url 為官方定價頁。",
+  "vendors": [
+    {"id": "anthropic", "name": "Anthropic", "slot": 1, "price_url": "https://www.anthropic.com/pricing"},
+    {"id": "openai",    "name": "OpenAI",    "slot": 2, "price_url": "https://developers.openai.com/api/docs/pricing"},
+    {"id": "google",    "name": "Google",    "slot": 3, "price_url": "https://ai.google.dev/pricing"},
+    {"id": "deepseek",  "name": "DeepSeek",  "slot": 4, "price_url": "https://api-docs.deepseek.com/quick_start/pricing"},
+    {"id": "xai",       "name": "xAI",       "slot": 5, "price_url": "https://docs.x.ai/developers/pricing"},
+    {"id": "other",     "name": "其他 / 開源", "slot": 6, "price_url": ""}
+  ],
+  "models": [
+    {"id": "claude-fable-5-1",   "name": "Claude Fable 5.1",   "vendor": "anthropic", "tier": "frontier", "openrouter": "anthropic/claude-fable-5.1"},
+    {"id": "claude-opus-5",      "name": "Claude Opus 5",      "vendor": "anthropic", "tier": "frontier", "openrouter": "anthropic/claude-opus-5"},
+    {"id": "claude-sonnet-5",    "name": "Claude Sonnet 5",    "vendor": "anthropic", "tier": "mid",      "openrouter": "anthropic/claude-sonnet-5"},
+    {"id": "claude-haiku-4-5",   "name": "Claude Haiku 4.5",   "vendor": "anthropic", "tier": "small",    "openrouter": "anthropic/claude-haiku-4.5"},
+    {"id": "gpt-6-astra",        "name": "GPT-6 Astra",        "vendor": "openai",    "tier": "frontier", "openrouter": "openai/gpt-6-astra"},
+    {"id": "gpt-5-6-sol",        "name": "GPT-5.6 Sol",        "vendor": "openai",    "tier": "frontier", "openrouter": "openai/gpt-5.6-sol"},
+    {"id": "gpt-5-6-terra",      "name": "GPT-5.6 Terra",      "vendor": "openai",    "tier": "mid",      "openrouter": "openai/gpt-5.6-terra"},
+    {"id": "gpt-5-6-luna",       "name": "GPT-5.6 Luna",       "vendor": "openai",    "tier": "small",    "openrouter": "openai/gpt-5.6-luna"},
+    {"id": "gemini-3-1-pro",     "name": "Gemini 3.1 Pro",     "vendor": "google",    "tier": "frontier", "openrouter": "google/gemini-3.1-pro"},
+    {"id": "gemini-3-8-flash",   "name": "Gemini 3.8 Flash",   "vendor": "google",    "tier": "mid",      "openrouter": "google/gemini-3.8-flash"},
+    {"id": "gemini-3-5-flash-lite", "name": "Gemini 3.5 Flash-Lite", "vendor": "google", "tier": "small", "openrouter": "google/gemini-3.5-flash-lite"},
+    {"id": "deepseek-v4-pro",    "name": "DeepSeek V4 Pro",    "vendor": "deepseek",  "tier": "mid",      "openrouter": "deepseek/deepseek-v4-pro"},
+    {"id": "deepseek-v4-1-flash","name": "DeepSeek V4.1 Flash","vendor": "deepseek",  "tier": "small",    "openrouter": "deepseek/deepseek-v4.1-flash"},
+    {"id": "grok-4-6",           "name": "Grok 4.6",           "vendor": "xai",       "tier": "frontier", "openrouter": "x-ai/grok-4.6"}
+  ],
+  "tiers": {"frontier": "旗艦", "mid": "中階", "small": "輕量"},
+  "labs": [
+    {"id": "anthropic", "name": "Anthropic"}, {"id": "openai", "name": "OpenAI"},
+    {"id": "google", "name": "Google"}, {"id": "xai", "name": "xAI"}
+  ],
+  "blend": {"input": 3, "output": 1, "_note": "混合價 = (3×輸入價 + 1×輸出價) / 4，對應一般對話／代理工作負載常見的 3:1 輸入輸出比"}
+}

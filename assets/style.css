@@ -179,6 +179,9 @@ table.data td.bad { color: var(--down-bad); }
 table.data .src { color: var(--muted); font-size: 11px; }
 .tbl-foot { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 12px; margin-top: 8px; flex-wrap: wrap; gap: 8px; }
 
+.card h3.sub { font-size: 13px; font-weight: 600; color: var(--ink-2); margin: 14px 0 6px; }
+.grid2 > div { min-width: 0; }
+
 /* ---------- index source cards ---------- */
 .ixgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-top: 12px; }
 .ixcard { border: 1px solid var(--border); border-left: 3px solid var(--c); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: var(--ink-2); background: var(--page); }

@@ -103,6 +103,44 @@
     <div class="hint" style="margin-top:8px">指數反映的是市場的「參考結算價」（Ornn 以實際成交為基礎；CGI、Silicon Data、AxonIndex 以牌價／報價觀測聚合）。本站中位數則是各供應商公開牌價，兩者的差距可當作「議價空間」的粗略指標。第三方指數值版權屬各發布者，此處僅作比較與連結，依其授權條款標示來源。</div>
   </section>
 
+  <section class="card" id="tokens">
+    <header><h2>Token 經濟：模型牌價與市場用量</h2>
+      <div class="seg" id="token-metric" role="group">
+        <button type="button" data-v="blend">混合價</button>
+        <button type="button" data-v="in">輸入</button>
+        <button type="button" data-v="out">輸出</button>
+      </div>
+    </header>
+    <div class="banner show" id="token-demo" style="display:none">⚠ 本區塊部分為<strong>示範資料</strong>：目前牌價來自各家官方定價頁（2026-09 抄錄），但歷史調價時點與 OpenRouter 用量為合成資料。執行 <code>python3 scripts/collect_tokens.py</code> 後會換成真實資料。</div>
+    <div class="kpis" style="margin:8px 0 12px">
+      <div class="tile" id="tk-frontier"><div class="label">旗艦模型輸出價中位數</div><div class="value">–</div><div class="delta"></div><div class="foot"></div></div>
+      <div class="tile" id="tk-usage"><div class="label">OpenRouter 週 token 用量</div><div class="value">–</div><div class="delta"></div><div class="spark"></div><div class="foot"></div></div>
+      <div class="tile" id="tk-bridge"><div class="label">一小時 H100 租金 ≈ 多少 token</div><div class="value">–</div><div class="delta"></div><div class="foot"></div></div>
+    </div>
+    <div class="ctl chips-ctl" style="margin-bottom:8px"><label>比較模型（最多 6 個）</label><div class="chips" id="token-chips"></div></div>
+    <div class="hint" id="token-hint" style="margin-bottom:6px"></div>
+    <div class="chart" id="token-chart"></div>
+    <ul class="legend" id="token-legend"></ul>
+    <h3 class="sub">最新牌價（每百萬 token，USD）</h3>
+    <div class="tbl" id="token-table"></div>
+    <div class="grid2" style="margin-top:14px">
+      <div>
+        <h3 class="sub">市場用量：OpenRouter 上一週 Top 15 模型</h3>
+        <div class="hint" id="usage-hint" style="margin-bottom:6px"></div>
+        <div class="chart" id="usage-chart"></div>
+      </div>
+      <div>
+        <h3 class="sub">OpenRouter 每週 token 總量</h3>
+        <div class="chart" id="usage-total-chart"></div>
+        <h3 class="sub" style="margin-top:14px">Ornn OTPI：各實驗室實際成交價</h3>
+        <div class="tbl" id="otpi-table"></div>
+      </div>
+    </div>
+    <h3 class="sub">產業級 token 處理總量（公司公開揭露）</h3>
+    <div class="tbl" id="industry-table"></div>
+    <div class="hint" style="margin-top:8px">牌價為官方定價頁的標準費率，未含批次折扣、快取折扣與尖離峰差價；「混合價」以 3:1 的輸入／輸出比加權。OpenRouter 用量只代表該平台流量，不等於全市場，但因涵蓋所有主要模型、每日公開，常被當作相對熱度指標（資料授權 CC BY 4.0）。Ornn OTPI 以實際成交 token 量加權，反映真實付費成本而非牌價。產業總量為各公司在發表會或財報中的自述，口徑不一（Google 含所有產品，Microsoft 只算 Foundry），僅供量級比較。</div>
+  </section>
+
   <section class="card">
     <header><h2>價格矩陣：加速器 × 供應商</h2><span class="hint">最新快照，每顆加速器每小時</span></header>
     <div class="heat" id="heatmap"></div>
