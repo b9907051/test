@@ -27,7 +27,10 @@
   "tiers": {"frontier": "旗艦", "mid": "中階", "small": "輕量"},
   "labs": [
     {"id": "anthropic", "name": "Anthropic"}, {"id": "openai", "name": "OpenAI"},
-    {"id": "google", "name": "Google"}, {"id": "xai", "name": "xAI"}
+    {"id": "google", "name": "Google"}, {"id": "deepseek", "name": "DeepSeek"},
+    {"id": "qwen", "name": "Qwen (Alibaba)"}, {"id": "moonshotai", "name": "Moonshot (Kimi)"},
+    {"id": "minimax", "name": "MiniMax"}, {"id": "z-ai", "name": "Z.ai (GLM)"},
+    {"id": "mistralai", "name": "Mistral"}, {"id": "meta-llama", "name": "Meta Llama"}, {"id": "xiaomi", "name": "Xiaomi"}
   ],
   "blend": {"input": 3, "output": 1, "_note": "混合價 = (3×輸入價 + 1×輸出價) / 4，對應一般對話／代理工作負載常見的 3:1 輸入輸出比"}
 }

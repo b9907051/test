@@ -11,7 +11,7 @@ Only the Python standard library is used. Run:  python3 scripts/collect.py
 Options: --date YYYY-MM-DD  --dry-run  --only vast,runpod,lambda,list
 """
 from __future__ import annotations
-import argparse, base64, datetime as dt, json, os, pathlib, statistics, sys, urllib.request, urllib.parse, urllib.error
+import argparse, base64, datetime as dt, json, os, pathlib, statistics, sys, time, urllib.request, urllib.parse, urllib.error
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -56,17 +56,28 @@ def collect_vast() -> list[tuple[str, str, str, float]]:
     for vast_name in sorted(set(n for g in CATALOG["gpus"] for n in g.get("aliases", {}).get("vast", []))):
         gpu_id = idx[vast_name.lower()]
         for vtype, ptype in (("on-demand", "on-demand"), ("bid", "spot")):
-            q = {"verified": {"eq": True}, "rentable": {"eq": True}, "num_gpus": {"eq": 1},
-                 "gpu_name": {"eq": vast_name}, "type": vtype, "order": [["dph_total", "asc"]], "limit": 64}
+            # any machine size: price per GPU = machine price / GPU count (gives far more offers than 1-GPU rigs only)
+            q = {"verified": {"eq": True}, "rentable": {"eq": True}, "num_gpus": {"lte": 8},
+                 "gpu_name": {"eq": vast_name}, "type": vtype, "order": [["dph_total", "asc"]], "limit": 128}
             url = "https://console.vast.ai/api/v0/bundles/?q=" + urllib.parse.quote(json.dumps(q))
-            try:
-                res = http_json(url)
-            except Exception as e:  # noqa: BLE001
-                print(f"  [vast] {vast_name}/{vtype}: {e}", file=sys.stderr)
-                continue
+            res = None
+            for attempt in range(3):
+                try:
+                    res = http_json(url); break
+                except urllib.error.HTTPError as e:
+                    if e.code == 429: time.sleep(4 * (attempt + 1)); continue
+                    print(f"  [vast] {vast_name}/{vtype}: {e}", file=sys.stderr); break
+                except Exception as e:  # noqa: BLE001
+                    print(f"  [vast] {vast_name}/{vtype}: {e}", file=sys.stderr); break
+            time.sleep(0.7)  # stay under the public API's rate limit
+            if res is None:
+                print(f"  [vast] {vast_name}/{vtype}: rate limited, skipped", file=sys.stderr); continue
             key = "min_bid" if vtype == "bid" else "dph_total"
-            offers = [o.get(key) or o.get("dph_total") for o in res.get("offers", [])]
-            price = robust_price(sorted(v for v in offers if isinstance(v, (int, float))))
+            offers = []
+            for o in res.get("offers", []):
+                v, n = o.get(key) or o.get("dph_total"), o.get("num_gpus") or 1
+                if isinstance(v, (int, float)) and v > 0: offers.append(v / max(1, n))
+            price = robust_price(sorted(offers))
             if price:
                 print(f"  [vast] {vast_name}/{ptype}: {price} (from {len(offers)} offers, min {min(offers) if offers else '-'})")
                 out.append((gpu_id, ptype, "vast", price))
@@ -86,7 +97,10 @@ def collect_runpod():
         if not gpu_id:
             continue
         lp = gt.get("lowestPrice") or {}
-        od = lp.get("uninterruptablePrice") or gt.get("securePrice") or gt.get("communityPrice")
+        secure, community = gt.get("securePrice"), gt.get("communityPrice")
+        # RunPod's advertised "from" price is the community-cloud on-demand rate; the lowestPrice block just echoes it.
+        # A community price far below secure is a placeholder (e.g. MI300X 0.5 vs 2.39) -> fall back to secure.
+        od = community if (community and secure and community >= 0.3 * secure) else (secure or community or lp.get("uninterruptablePrice"))
         spot = lp.get("minimumBidPrice")
         print(f"  [runpod] {gt.get('id')}: secure={gt.get('securePrice')} community={gt.get('communityPrice')} lowest={lp}")
         if od:

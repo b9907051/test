@@ -36,7 +36,7 @@ def http_json(url, *, method="GET", body=None, headers=None, form=None, timeout=
 
 
 # ----------------------------------------------------------------- tolerant record extraction
-NUM_KEYS = ("value", "index_value", "price", "settlement", "settle", "close", "usd_per_gpu_hour", "index")
+NUM_KEYS = ("value", "index_value", "indexPerGpuHour", "indexPerHour", "index_per_gpu_hour", "price", "settlement", "settle", "close", "usd_per_gpu_hour", "index")
 TS_KEYS = ("date", "day", "ts", "timestamp", "time", "observed_at", "as_of", "settled_at", "fixing_date")
 
 
@@ -84,19 +84,37 @@ def collect_cgi(days):
         if not entry:
             print(f"  [cgi] sku {sku} not in latest.json (have: {sorted({str(v.get('sku') or v.get('gpu') or v.get('model')) for v in entries})[:12]})", file=sys.stderr); continue
         prefix = entry.get("history_path") or entry.get("path") or f"{sku}/v{entry.get('current_version') or entry.get('version') or 1}"
-        got = 0
+        got = 0; first_url = None; misses = 0
         for i in range(days):
             day = today - dt.timedelta(days=i)
             url = f"{base}/{prefix.strip('/')}/observations/{day:%Y}/{day:%m}/{day:%d}.json"
+            first_url = first_url or url
             try:
                 doc = http_json(url)
             except urllib.error.HTTPError as e:
-                if e.code == 404: continue
+                if e.code == 404:
+                    misses += 1
+                    if misses >= 5 and got == 0: break   # layout is wrong; stop hammering the CDN
+                    continue
                 raise
             pts = extract_points(doc, default_date=day.isoformat())
             if day.isoformat() in pts:
                 out.append((day.isoformat(), "cgi", gpu_id, pts[day.isoformat()])); got += 1
-        print(f"  [cgi] {sku}: {got} days")
+        if got == 0:
+            print(f"  [cgi] {sku}: flat files 404 (entry={json.dumps(entry)[:300]} first_url={first_url}); trying API", file=sys.stderr)
+            api = src["endpoint"].get("api_base", "https://api.getcomputable.com/v1/index").rstrip("/")
+            for url in (f"{api}/{sku}/history?days={days}", f"{api}/{sku}/history", f"{api}/{sku}/latest", f"{api}/{sku}", f"{api}/latest?sku={sku}"):
+                try:
+                    doc = http_json(url)
+                except urllib.error.HTTPError as e:
+                    print(f"  [cgi] {url} -> {e.code}", file=sys.stderr); continue
+                pts = extract_points(doc, default_date=today.isoformat())
+                if pts:
+                    out += [(d, "cgi", gpu_id, v) for d, v in pts.items()]; got = len(pts)
+                    print(f"  [cgi] {sku}: {got} days via {url}"); break
+                print(f"  [cgi] {url} answered but no points; head={json.dumps(doc)[:250]}", file=sys.stderr)
+        else:
+            print(f"  [cgi] {sku}: {got} days")
     return out
 
 
@@ -119,13 +137,19 @@ def collect_ocpi(days):
         pts = None; tried = []
         for param in dict.fromkeys([ep.get("gpu_param", "gpu_name"), "gpu_name", "gpuName"]):
             for path in ep["price_paths"]:
-                q = urllib.parse.urlencode({param: gpu_name, "startDate": start.isoformat(), "endDate": end.isoformat()})
-                url = f"{base}{path}?{q}"; tried.append(url)
-                try:
-                    doc = http_json(url, headers=headers)
-                except urllib.error.HTTPError as e:
-                    if e.code in (400, 404, 405, 422): continue
-                    raise
+                doc = None
+                # free tier caps the range; a range the tier does not allow can come back as 401/403 -> retry without dates
+                for qs in ({param: gpu_name, "startDate": start.isoformat(), "endDate": end.isoformat()}, {param: gpu_name}):
+                    url = f"{base}{path}?" + urllib.parse.urlencode(qs); tried.append(url)
+                    try:
+                        doc = http_json(url, headers=headers); break
+                    except urllib.error.HTTPError as e:
+                        try: body = e.read().decode()[:160]
+                        except Exception: body = ""
+                        print(f"  [ocpi] {path}?{param}=... -> {e.code} {body}", file=sys.stderr)
+                        if e.code in (400, 401, 403, 404, 405, 422): continue
+                        raise
+                if doc is None: continue
                 pts = extract_points(doc)
                 if pts:
                     print(f"  [ocpi] {gpu_name}: {len(pts)} days via {path}?{param}="); break

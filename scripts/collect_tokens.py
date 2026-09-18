@@ -110,53 +110,40 @@ def openrouter_usage(days):
 
 
 def ornn_otpi(days):
+    """Ornn Token Price Index. Free tier: GET /api/otpi?lab=<lab>[&startDate&endDate] -> trailing month.
+    Without a lab the endpoint returns every free lab at once; rows look like
+    {"date": "2026-08-19", "lab": "anthropic", "indexPerMtok": 2.19, "computedAt": ...}."""
     base = "https://api.ornnai.com"
     key = os.environ.get("ORNN_API_KEY")
     headers = {"Authorization": f"Bearer {key}"} if key else {}
-    end = dt.date.today(); start = end - dt.timedelta(days=days)
-    # discover the lab identifiers the API expects (mirrors /api/gpu-types-free on the compute side)
-    lab_names = {}
-    for path in ("/api/lab-types-free", "/api/labs-free", "/api/lab-types", "/api/labs"):
-        try:
-            doc = http_json(f"{base}{path}", headers=headers)
-        except urllib.error.HTTPError as e:
-            if e.code in (400, 404, 405): continue
-            raise
+    end = dt.date.today(); start = end - dt.timedelta(days=min(days, 30 if not key else days))
+    def rows_of(doc):
+        out = []
         for d in _walk(doc):
-            n = d.get("lab_name") or d.get("labName") or d.get("lab") or d.get("name")
-            if isinstance(n, str): lab_names[n.lower()] = n
-        print(f"  [ornn_otpi] labs via {path}: {sorted(lab_names.values())}")
-        break
-    out = []
+            lab = d.get("lab"); v = d.get("indexPerMtok", d.get("index_per_mtok", d.get("value")))
+            t = d.get("date")
+            if isinstance(lab, str) and isinstance(v, (int, float)) and isinstance(t, str) and v > 0:
+                out.append([t[:10], lab.lower(), round(float(v), 4), "ornn"])
+        return out
+    attempts = [f"{base}/api/otpi?" + urllib.parse.urlencode({"startDate": start.isoformat(), "endDate": end.isoformat()}), f"{base}/api/otpi"]
     for lab in sorted(LABS):
-        api_lab = lab_names.get(lab, lab)
-        pts, tried = {}, []
-        for path in ("/api/otpi", "/api/tokens", "/api/token-index", "/api/otpi/history"):
-            for param in ("lab_name", "lab", "labName"):
-                url = f"{base}{path}?" + urllib.parse.urlencode({param: api_lab, "startDate": start.isoformat(), "endDate": end.isoformat()})
-                tried.append(url)
-                try:
-                    doc = http_json(url, headers=headers)
-                except urllib.error.HTTPError as e:
-                    if e.code in (400, 404, 405, 422):
-                        try: body = e.read().decode()[:200]
-                        except Exception: body = ""
-                        if e.code == 400 and body: print(f"  [ornn_otpi] {path}?{param}= -> 400 {body}", file=sys.stderr)
-                        continue
-                    raise
-                for d in _walk(doc):
-                    v = next((d[k] for k in ("value", "price", "settlement", "usd_per_million", "usdPerMillion") if isinstance(d.get(k), (int, float))), None)
-                    t = next((d[k] for k in ("date", "day", "ts", "timestamp", "settled_at") if isinstance(d.get(k), str)), None)
-                    if v and t: pts[t[:10]] = round(float(v), 4)
-                if pts:
-                    print(f"  [ornn_otpi] {lab}: {len(pts)} days via {path}?{param}="); break
-                print(f"  [ornn_otpi] {lab}: {path}?{param}= answered but no (date,value) pairs; head={json.dumps(doc)[:250]}", file=sys.stderr)
-            if pts: break
-        if pts:
-            out += [[d, lab, v, "ornn"] for d, v in pts.items()]
-        else:
-            print(f"  [ornn_otpi] {lab}: no data; first tried {tried[0]}", file=sys.stderr)
-    return {"otpi": out}
+        attempts.append(f"{base}/api/otpi?" + urllib.parse.urlencode({"lab": lab, "startDate": start.isoformat(), "endDate": end.isoformat()}))
+    got = {}
+    for url in attempts:
+        try:
+            rows = rows_of(http_json(url, headers=headers))
+        except urllib.error.HTTPError as e:
+            try: body = e.read().decode()[:200]
+            except Exception: body = ""
+            print(f"  [ornn_otpi] {url.split('?')[0]}?{url.split('?')[1][:40] if '?' in url else ''} -> {e.code} {body}", file=sys.stderr)
+            continue
+        for r in rows:
+            got[(r[0], r[1])] = r
+        if rows and "lab=" not in url:
+            break  # the all-labs call worked; no need for per-lab calls
+    labs_seen = sorted({r[1] for r in got.values()})
+    print(f"  [ornn_otpi] {len(got)} rows, labs={labs_seen}")
+    return {"otpi": [r for r in got.values() if r[1] in LABS]}
 
 
 def _walk(o):
@@ -204,10 +191,10 @@ def main():
 
     pp = DATA / "token_prices.json"
     pdoc = load(pp, {"meta": {}, "rows": [], "otpi": []})
-    if pdoc["meta"].get("demo") and got["prices"] and any(r[5] != "manual" for r in got["prices"]):
+    if any(r[5] not in ("manual", "demo") for r in got["prices"]):
         pdoc["rows"] = [r for r in pdoc["rows"] if r[5] != "demo"]
-    if pdoc["meta"].get("demo") and got["otpi"]:
-        pdoc["otpi"] = [r for r in pdoc["otpi"] if r[3] != "demo"]
+    if any(r[3] != "demo" for r in got["otpi"]):
+        pdoc["otpi"] = [r for r in pdoc.get("otpi", []) if r[3] != "demo"]
     pdoc["rows"] = merge(pdoc["rows"], got["prices"], 2)
     pdoc["otpi"] = merge(pdoc.get("otpi", []), got["otpi"], 2)
     pdoc["meta"] = {**pdoc["meta"], "generated_at": now, "unit": "USD per 1M tokens",
@@ -217,7 +204,7 @@ def main():
 
     up = DATA / "token_usage.json"
     udoc = load(up, {"meta": {}, "rows": []})
-    if udoc["meta"].get("demo") and any(r[4] not in ("manual",) for r in got["usage"] if r[1] != "industry"):
+    if any(r[4] not in ("manual", "demo") for r in got["usage"] if r[1] != "industry"):
         udoc["rows"] = [r for r in udoc["rows"] if r[4] != "demo"]
     udoc["rows"] = merge(udoc["rows"], got["usage"], 3)
     udoc["meta"] = {**udoc["meta"], "generated_at": now, "unit": "tokens",
