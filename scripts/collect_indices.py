@@ -71,50 +71,81 @@ def extract_points(doc, default_date=None):
 
 # ----------------------------------------------------------------- adapters
 def collect_cgi(days):
+    """Computable GPU Index. latest.json lists per-SKU entries like
+    {"sku": "H100", "versions": {"current_version": 7, "methodology_id": "h100_sxm_v1_calc_v16", ...}}.
+    Published record layout (from the project's reproduce script):
+      {base}/{prefix}/observations/{YYYY}/{MM}/{DD}.json   prefix = {sku}/v{version}
+      {base}/{prefix}/composites/{methodology_id}/{DATE}.json
+    Case of the sku segment is unknown, so both are tried; the REST API is the last resort."""
     src = SOURCES["cgi"]; base = src["endpoint"]["flat_base"].rstrip("/")
+    api = src["endpoint"].get("api_base", "https://api.getcomputable.com/v1/index").rstrip("/")
     latest = http_json(f"{base}/latest.json")
-    # find every dict that names a SKU, wherever it sits in the document
-    entries = [d for d in walk(latest) if isinstance(d.get("sku") or d.get("gpu") or d.get("model"), str)]
+    entries = [d for d in walk(latest) if isinstance(d.get("sku"), str) and isinstance(d.get("versions"), dict)]
     if not entries:
-        print(f"  [cgi] no sku entries found; latest.json top-level keys={list(latest)[:8]} head={json.dumps(latest)[:400]}", file=sys.stderr)
+        entries = [d for d in walk(latest) if isinstance(d.get("sku"), str)]
+    if not entries:
+        print(f"  [cgi] no sku entries; latest.json head={json.dumps(latest)[:400]}", file=sys.stderr)
     out = []
     today = dt.date.today()
+
+    def fetch(url):
+        try:
+            return http_json(url), None
+        except urllib.error.HTTPError as e:
+            try: body = e.read().decode()[:160]
+            except Exception: body = ""
+            return None, f"{e.code} {body.strip()[:120]}"
+
     for gpu_id, sku in src["gpus"].items():
-        entry = next((v for v in entries if str(v.get("sku") or v.get("gpu") or v.get("model")).lower() == sku), None)
+        entry = next((v for v in entries if str(v.get("sku")).lower() == sku), None)
         if not entry:
-            print(f"  [cgi] sku {sku} not in latest.json (have: {sorted({str(v.get('sku') or v.get('gpu') or v.get('model')) for v in entries})[:12]})", file=sys.stderr); continue
-        prefix = entry.get("history_path") or entry.get("path") or f"{sku}/v{entry.get('current_version') or entry.get('version') or 1}"
-        got = 0; first_url = None; misses = 0
-        for i in range(days):
-            day = today - dt.timedelta(days=i)
-            url = f"{base}/{prefix.strip('/')}/observations/{day:%Y}/{day:%m}/{day:%d}.json"
-            first_url = first_url or url
-            try:
-                doc = http_json(url)
-            except urllib.error.HTTPError as e:
-                if e.code == 404:
-                    misses += 1
-                    if misses >= 5 and got == 0: break   # layout is wrong; stop hammering the CDN
-                    continue
-                raise
-            pts = extract_points(doc, default_date=day.isoformat())
-            if day.isoformat() in pts:
-                out.append((day.isoformat(), "cgi", gpu_id, pts[day.isoformat()])); got += 1
-        if got == 0:
-            print(f"  [cgi] {sku}: flat files 404 (entry={json.dumps(entry)[:300]} first_url={first_url}); trying API", file=sys.stderr)
-            api = src["endpoint"].get("api_base", "https://api.getcomputable.com/v1/index").rstrip("/")
-            for url in (f"{api}/{sku}/history?days={days}", f"{api}/{sku}/history", f"{api}/{sku}/latest", f"{api}/{sku}", f"{api}/latest?sku={sku}"):
-                try:
-                    doc = http_json(url)
-                except urllib.error.HTTPError as e:
-                    print(f"  [cgi] {url} -> {e.code}", file=sys.stderr); continue
-                pts = extract_points(doc, default_date=today.isoformat())
-                if pts:
-                    out += [(d, "cgi", gpu_id, v) for d, v in pts.items()]; got = len(pts)
-                    print(f"  [cgi] {sku}: {got} days via {url}"); break
-                print(f"  [cgi] {url} answered but no points; head={json.dumps(doc)[:250]}", file=sys.stderr)
-        else:
-            print(f"  [cgi] {sku}: {got} days")
+            print(f"  [cgi] sku {sku} not in latest.json (have {sorted({str(v.get('sku')) for v in entries})})", file=sys.stderr); continue
+        ver = entry.get("versions") if isinstance(entry.get("versions"), dict) else entry
+        cv = ver.get("current_version") or ver.get("version") or entry.get("current_version") or 1
+        meth = ver.get("methodology_id") or entry.get("methodology_id")
+        sku_variants = dict.fromkeys([sku, sku.upper(), str(entry.get("sku"))])
+        prefixes = [entry.get("history_path")] if entry.get("history_path") else []
+        for sv in sku_variants:
+            prefixes.append(f"{sv}/v{cv}")
+        # pattern candidates for one day's file
+        patterns = []
+        for pre in prefixes:
+            patterns.append(lambda d, pre=pre: f"{base}/{pre.strip('/')}/observations/{d:%Y}/{d:%m}/{d:%d}.json")
+        if meth:
+            for sv in sku_variants:
+                patterns.append(lambda d, sv=sv: f"{base}/{sv}/composites/{meth}/{d.isoformat()}.json")
+                patterns.append(lambda d, sv=sv: f"{base}/{sv}/v{cv}/composites/{meth}/{d.isoformat()}.json")
+        chosen = None; errs = []
+        for pat in patterns:                       # find a pattern that answers for any of the last 3 days
+            for i in range(3):
+                d = today - dt.timedelta(days=i)
+                doc, err = fetch(pat(d))
+                if doc is not None: chosen = pat; break
+                errs.append(f"{pat(d)} -> {err}")
+            if chosen: break
+        got = 0
+        if chosen:
+            for i in range(days):
+                d = today - dt.timedelta(days=i)
+                doc, err = fetch(chosen(d))
+                if doc is None: continue
+                pts = extract_points(doc, default_date=d.isoformat())
+                v = pts.get(d.isoformat()) or (list(pts.values())[-1] if pts else None)
+                if v: out.append((d.isoformat(), "cgi", gpu_id, v)); got += 1
+            print(f"  [cgi] {sku}: {got} days via {chosen(today)}")
+            continue
+        print(f"  [cgi] {sku}: no flat-file pattern answered (v{cv}, {meth}); e.g. {errs[:2]}; trying API", file=sys.stderr)
+        for url in (f"{api}/{sku}/history?days={days}", f"{api}/{sku}/history?from={(today - dt.timedelta(days=days)).isoformat()}&to={today.isoformat()}",
+                    f"{api}/{sku}/history?start={(today - dt.timedelta(days=days)).isoformat()}&end={today.isoformat()}", f"{api}/{sku}/history?limit={days}",
+                    f"{api}/history?sku={sku}", f"{api}/{sku}/latest", f"{api}/latest/{sku}", f"{api}/{sku}"):
+            doc, err = fetch(url)
+            if doc is None:
+                print(f"  [cgi] {url} -> {err}", file=sys.stderr); continue
+            pts = extract_points(doc, default_date=today.isoformat())
+            if pts:
+                out += [(d, "cgi", gpu_id, v) for d, v in pts.items()]
+                print(f"  [cgi] {sku}: {len(pts)} days via {url}"); break
+            print(f"  [cgi] {url} answered but no points; head={json.dumps(doc)[:250]}", file=sys.stderr)
     return out
 
 
@@ -146,7 +177,8 @@ def collect_ocpi(days):
                     except urllib.error.HTTPError as e:
                         try: body = e.read().decode()[:160]
                         except Exception: body = ""
-                        print(f"  [ocpi] {path}?{param}=... -> {e.code} {body}", file=sys.stderr)
+                        if e.code != 404:   # 404 = route does not exist (HTML page); only routes that exist are worth logging
+                            print(f"  [ocpi] {path}?{param}=... -> {e.code} {body.strip()[:120]}", file=sys.stderr)
                         if e.code in (400, 401, 403, 404, 405, 422): continue
                         raise
                 if doc is None: continue

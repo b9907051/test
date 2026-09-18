@@ -174,6 +174,10 @@ def main():
     keyed = {tuple(r[:4]): r for r in rows}
     for r in new:
         keyed[tuple(r[:4])] = r
+    for k in [k for k in keyed if k[3] == "spot"]:
+        od = keyed.get((k[0], k[1], k[2], "on-demand"))
+        if od and abs(float(od[4]) - float(keyed[k][4])) < 1e-6:
+            del keyed[k]
     rows = sorted(keyed.values())
 
     doc["rows"] = rows
