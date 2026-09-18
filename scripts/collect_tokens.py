@@ -46,17 +46,29 @@ def base_slug(s: str) -> str:
 
 # ----------------------------------------------------------------- prices
 def openrouter_prices(days):
+    """Standard list prices only: ':batch', ':free', ':thinking' etc. are separate listings at different
+    rates (batch = 50% off) and must not be folded into the base model. When several plain ids map to
+    one catalog model (e.g. a dated snapshot and an alias) the exact catalog id wins, else the newest."""
     doc = http_json("https://openrouter.ai/api/v1/models")
-    out = []
+    best = {}   # catalog model id -> (rank, or_id, i, o, c)
     for m in doc.get("data", []):
-        mid = BY_OR.get(base_slug(m.get("id", "")))
+        oid = m.get("id", "")
+        if ":" in oid:
+            continue
+        mid = BY_OR.get(base_slug(oid))
         if not mid:
             continue
         p = m.get("pricing") or {}
         i, o = per_million(p.get("prompt")), per_million(p.get("completion"))
-        if i is None or o is None:
+        if i is None or o is None or (i == 0 and o == 0):
             continue
-        out.append([TODAY, mid, i, o, per_million(p.get("input_cache_read")), "openrouter"])
+        rank = (0 if oid == MODELS[mid]["openrouter"] else 1, -(m.get("created") or 0))
+        if mid not in best or rank < best[mid][0]:
+            best[mid] = (rank, oid, i, o, per_million(p.get("input_cache_read")))
+    out = []
+    for mid, (_, oid, i, o, c) in sorted(best.items()):
+        print(f"  [openrouter_prices] {mid} <- {oid}: in={i} out={o} cached={c}")
+        out.append([TODAY, mid, i, o, c, "openrouter"])
     return {"prices": out}
 
 

@@ -313,9 +313,11 @@
     // 1) index
     const ix = indexSeries(dates);
     const ixAll = indexSeries(DATES).values;
-    const ixNow = ixAll[ixAll.length - 1], ixThen = ixAll[Math.max(0, DATES.findIndex((d) => toT(d) >= t - 30 * DAY))];
+    const thenIdx = Math.max(0, DATES.findIndex((d) => toT(d) >= t - 30 * DAY));
+    const ixNow = ixAll[ixAll.length - 1], ixThen = ixAll[thenIdx];
+    const spanDays = Math.round((t - toT(DATES[thenIdx])) / DAY);
     $("#kpi-index .value").innerHTML = ixNow != null ? ixNow.toFixed(1) : "–";
-    setDelta($("#kpi-index .delta"), ixNow && ixThen ? ixNow / ixThen - 1 : null, "30日");
+    setDelta($("#kpi-index .delta"), ixNow && ixThen && spanDays > 0 ? ixNow / ixThen - 1 : null, spanDays >= 25 ? "30日" : `${spanDays} 日`);
     sparkline($("#kpi-index .spark"), ix.values);
     $("#kpi-index .foot").textContent = `基準 ${DATES[0]} = 100 · 籃子：${ix.basket.map((id) => GPU[id].short).join("、")}（隨需價中位數）`;
     // 2) H100 median
@@ -344,7 +346,7 @@
     $("#kpi-mover .foot").textContent = mover ? `中位數 ${fmtMoney(medianAt(mover.g.id, state.type, t))}/hr · ${typeName()}` : "";
   }
   function setDelta(el, pct, label) {
-    el.textContent = pct == null ? "–" : `${pct <= 0 ? "▼" : "▲"} ${fmtPct(Math.abs(pct))} ${label}`;
+    el.textContent = pct == null ? "–" : `${pct <= 0 ? "▼" : "▲"} ${(Math.abs(pct) * 100).toFixed(1)}% ${label}`;
     el.className = "delta " + (pct == null ? "" : pct < -0.001 ? "good" : pct > 0.001 ? "bad" : "");
   }
   const typeName = () => CAT.price_types.find((p) => p.id === state.type)?.name || state.type;
@@ -618,7 +620,7 @@
     $("#token-demo").style.display = (TKMETA.pricesDemo || TKMETA.usageDemo) ? "" : "none";
   }
   function setDeltaUp(el, pct, label) {   // for volumes: up is neutral-good, shown in ink
-    el.textContent = pct == null ? "–" : `${pct >= 0 ? "▲" : "▼"} ${fmtPct(Math.abs(pct))} ${label}`; el.className = "delta";
+    el.textContent = pct == null ? "–" : `${pct >= 0 ? "▲" : "▼"} ${(Math.abs(pct) * 100).toFixed(1)}% ${label}`; el.className = "delta";
   }
 
   function renderAll() {

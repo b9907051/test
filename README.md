@@ -23,7 +23,7 @@
 | 指數 | 發布者 | 性質 | 取得方式 | 收集器 |
 |---|---|---|---|---|
 | Computable GPU Index (CGI) | Computable | 固定 29 家面板牌價、四分位間投票平均、開源可重算 | 開放 flat files / REST，無需金鑰（資料 CC BY-NC 4.0） | `cgi` 自動 |
-| Ornn Compute Price Index (OCPI) | Ornn | 實際成交的成交量加權平均，Bloomberg / ICE 期貨參考 | 免費層：最新值 + 3 個月、5 款 GPU，無需金鑰 | `ocpi` 自動 |
+| Ornn Compute Price Index (OCPI) | Ornn | 實際成交的成交量加權平均，Bloomberg / ICE 期貨參考 | `/api/index` 需要 API key（data.ornn.com 免費註冊）；未設定金鑰時收集器會略過 | `ocpi`（需 `ORNN_API_KEY`） |
 | Silicon Data Rental Index (SDH100RT 等) | Silicon Data | 30+ 來源、每日 350 萬筆觀測 | 僅 Plus / Professional 訂閱者 API | `sdh`（需帳密） |
 | AxonIndex GCI | AxonIndex | 20+ 供應商、7 區域、流動性加權每日定盤 | 未見公開 API | 人工登錄 `data/index_manual.json` |
 
@@ -32,7 +32,7 @@ python3 scripts/collect_indices.py                 # cgi + ocpi（免費）+ 人
 python3 scripts/collect_indices.py --only cgi --days 30 --dry-run
 ```
 
-端點與 GPU 名稱對應都在 `data/index_sources.json`，若對方 API 路徑調整，改設定即可。第一次在有網路的環境執行前，這些 adapter 尚未經真實 API 驗證；若某來源失敗，log 會指出是哪個路徑，請對照對方文件修改設定。
+端點與 GPU 名稱對應都在 `data/index_sources.json`，若對方 API 路徑調整，改設定即可。截至 2026-09-18 在 GitHub Actions 上實測：Vast.ai、RunPod、Computable CGI、Ornn OTPI、OpenRouter 牌價皆可無金鑰取得；Ornn OCPI 需要免費 API key；OpenRouter 用量需要免費 API key；Lambda 與 Silicon Data 需付費／帳號金鑰。
 
 ## Token 經濟（模型牌價與市場用量）
 
