@@ -623,8 +623,138 @@
     el.textContent = pct == null ? "–" : `${pct >= 0 ? "▲" : "▼"} ${(Math.abs(pct) * 100).toFixed(1)}% ${label}`; el.className = "delta";
   }
 
+  // ------------------------------------------------------------ investor summary
+  /** generic ascending-by-time series -> {first,last,pct,days,fromDate,toDate} or null if too short */
+  function seriesTrend(list) {
+    if (!list || list.length < 2) return null;
+    const first = list[0], last = list[list.length - 1];
+    const days = Math.round((last.t - first.t) / DAY);
+    if (days < 1 || !first.v || !last.v) return null;
+    return { first: first.v, last: last.v, pct: last.v / first.v - 1, days, fromDate: first.d, toDate: last.d };
+  }
+  const trendWord = (pct, up = "漲", down = "跌", flat = "持平") => Math.abs(pct) < 0.005 ? flat : (pct > 0 ? up : down);
+  const pctAbs = (pct) => (Math.abs(pct) * 100).toFixed(1);
+
+  function renderInvestorSummary() {
+    const box = $("#investor-summary"); if (!box) return;
+    const t = latestT();
+    const cards = [];
+
+    // ---- 1) supply/demand: CGI institutional index trend per GPU + spot/on-demand tightness
+    let cgiRows = [];
+    if (IXSRC.cgi) {
+      for (const gpuId of Object.keys(IXSRC.cgi.gpus)) {
+        if (!GPU[gpuId]) continue;
+        const tr = seriesTrend(ixSeries("cgi", gpuId));
+        if (tr) cgiRows.push({ gpu: GPU[gpuId], ...tr });
+      }
+    }
+    let tightRows = [];
+    for (const g of CAT.gpus) {
+      const od = medianAt(g.id, "on-demand", t), sp = medianAt(g.id, "spot", t);
+      if (od && sp && providerCount(g.id, "on-demand", t) >= 1 && providerCount(g.id, "spot", t) >= 1) {
+        tightRows.push({ gpu: g, ratio: sp / od });
+      }
+    }
+    if (cgiRows.length || tightRows.length) {
+      cgiRows.sort((a, b) => b.pct - a.pct);
+      tightRows.sort((a, b) => b.ratio - a.ratio);
+      const riser = cgiRows[0], faller = cgiRows[cgiRows.length - 1];
+      const tight = tightRows[0], loose = tightRows[tightRows.length - 1];
+      let body = "";
+      if (tight) body += `市場上「${tight.gpu.short}」幾乎一位難求——即使是可能被中斷的競價時段，價格也只比隨需價低 ${(100 - tight.ratio * 100).toFixed(0)}%，顯示留給撿便宜的閒置產能很少。`;
+      if (loose && loose !== tight) body += `相對地，「${loose.gpu.short}」的競價價只要隨需價的 ${(loose.ratio * 100).toFixed(0)}%，代表市場上還有不少人願意折價出租閒置產能。`;
+      if (riser && faller && riser !== faller) body += `獨立機構指數也呼應這個分歧：過去 ${riser.days} 天「${riser.gpu.short}」累計${trendWord(riser.pct)} ${pctAbs(riser.pct)}%，「${faller.gpu.short}」則幾乎${trendWord(faller.pct, "上漲", "下跌")} ${pctAbs(faller.pct)}%。`;
+      if (body) cards.push({
+        badge: "供需信號", title: "領先晶片仍缺貨，成熟晶片轉入競爭", body,
+        note: "資料脈絡：NVIDIA（GPU 供應商）、CoreWeave／Nebius／Lambda 等 AI 專用雲（產能出租方）",
+      });
+    }
+
+    // ---- 2) pricing strategy: OTPI realized token cost trend per lab
+    let otpiRows = [];
+    for (const l of TK.labs) {
+      const tr = seriesTrend(TKOTPI.get(l.id));
+      if (tr) otpiRows.push({ lab: l, ...tr });
+    }
+    if (otpiRows.length) {
+      otpiRows.sort((a, b) => a.pct - b.pct);
+      const cutter = otpiRows[0], holder = otpiRows[otpiRows.length - 1];
+      let body = `以實際成交量加權的 Token 成本指數來看，過去約 ${cutter.days} 天「${cutter.lab.name}」的每百萬 token 實際成本${trendWord(cutter.pct)}了 ${pctAbs(cutter.pct)}%`;
+      body += cutter.pct < 0 ? "，降幅最深；" : "；";
+      if (holder && holder !== cutter) body += `「${holder.lab.name}」則${trendWord(holder.pct, "小漲", "小跌", "幾乎持平")} ${pctAbs(holder.pct)}%。`;
+      body += "降價可能反映推理效率提升，也可能是搶市占的策略；若持續下去，可能壓縮相關服務的單位營收，除非用量成長能蓋過降價幅度。";
+      cards.push({
+        badge: "定價策略", title: "AI 推理成本各家步調不一", body,
+        note: "資料脈絡：Anthropic、OpenAI、Google（母公司 Alphabet）、DeepSeek 等模型供應商，多數為私人公司或母公司子業務，非直接可投資標的",
+      });
+    }
+
+    // ---- 3) list price vs realized settlement gap
+    let gapRows = [];
+    for (const l of TK.labs) {
+      const otpiList = TKOTPI.get(l.id); if (!otpiList || !otpiList.length) continue;
+      const realized = otpiList[otpiList.length - 1].v;
+      const blends = TK.models.filter((m) => m.vendor === l.id).map((m) => { const p = tkAt(m.id, t); return p ? blendOf(p) : null; }).filter((v) => v != null);
+      if (!blends.length || !realized) continue;
+      const listMed = median(blends);
+      gapRows.push({ lab: l, listMed, realized, ratio: listMed / realized });
+    }
+    if (gapRows.length) {
+      gapRows.sort((a, b) => b.ratio - a.ratio);
+      const widest = gapRows[0];
+      let body = `把各家官網公告的每百萬 token 牌價（依 3:1 輸入輸出比換算）拿來跟 Ornn 揭露的實際結算價比較，「${widest.lab.name}」的落差最大：牌價中位數是實際結算價的 ${widest.ratio.toFixed(1)} 倍（${fmtPerM(widest.listMed)} vs ${fmtPerM(widest.realized)}）。`;
+      body += "這通常是因為大量用量集中在較便宜的輕量模型，加上提示詞快取折扣——提醒我們不能只用「牌價 × 預估用量」去推算一家公司的 token 營收。";
+      const tableRows = gapRows.map((r) => `<tr><td>${r.lab.name}</td><td class="num">${fmtPerM(r.listMed)}</td><td class="num">${fmtPerM(r.realized)}</td><td class="num"><b>${r.ratio.toFixed(1)}×</b></td></tr>`).join("");
+      cards.push({
+        badge: "計價陷阱", title: "牌價只是參考價，真正成本差很大", body,
+        table: `<table class="data" style="margin-top:8px"><thead><tr><th>模型供應商</th><th class="num">牌價中位數 $/M</th><th class="num">實際結算 $/M</th><th class="num">倍數</th></tr></thead><tbody>${tableRows}</tbody></table>`,
+        note: "適用於：任何用「牌價 × 預期用量」估算 AI 服務營收的估值模型",
+      });
+    }
+
+    // ---- 4) overall rental market index
+    const ix = indexSeries(DATES);
+    if (ix.values.some((v) => v != null)) {
+      const vals = ix.values.filter((v) => v != null);
+      const first = vals[0], last = vals[vals.length - 1];
+      const days = Math.round((toT(DATES[DATES.length - 1]) - toT(DATES[ix.values.findIndex((v) => v != null)])) / DAY);
+      if (days >= 1 && first) {
+        const pct = last / first - 1;
+        cards.push({
+          badge: "整體行情", title: "算力租金大盤：漲跌互見還是全面降價？",
+          body: `本站追蹤的 GPU 隨需租金組成的價格指數，自開始追蹤的 ${days} 天以來累計${trendWord(pct)} ${pctAbs(pct)}%。這個指數把多款晶片放在一起看，比單一晶片的價格更能代表「整體算力有沒有變便宜」。`,
+          note: `涵蓋：${ix.basket.map((id) => GPU[id].short).join("、")}`,
+        });
+      }
+    }
+
+    // ---- headline synthesis (2x2 on GPU-tightness sign x token-cost sign)
+    const gpuUp = cgiRows.length ? cgiRows[0].pct > 0 : null;
+    const tokenDown = otpiRows.length ? otpiRows[0].pct < 0 : null;
+    let headline;
+    if (gpuUp != null && tokenDown != null) {
+      if (gpuUp && tokenDown) headline = "這裡的重點：算力市場正呈現「兩頭不同調」——最新晶片仍供不應求、租金持續上升，但 AI 推理的實際成本卻在快速下降。對投資人來說，這代表基礎建設（晶片、機房）端可能還有漲價空間，但應用層的毛利率壓力可能會持續，除非用量成長速度能蓋過降價幅度。";
+      else if (gpuUp && !tokenDown) headline = "這裡的重點：晶片端與應用端的價格目前是同向走升——租金和推理成本都在上漲，比較像是需求全面吃緊，而非單純的價格戰。";
+      else if (!gpuUp && tokenDown) headline = "這裡的重點：晶片租金與推理成本雙雙下滑，比較像是供給追上了需求，整條 AI 算力供應鏈的價格都在正常化。";
+      else headline = "這裡的重點：晶片租金回落、但推理成本沒有明顯下降，可能代表降價的壓力還沒完全傳導到終端服務價格。";
+    } else {
+      headline = "這裡的重點：以下每張卡片都是從本站當天追蹤到的即時數據自動生成，資料還在累積中，觀察窗越長，結論會越可靠。";
+    }
+    $("#investor-headline").textContent = headline;
+
+    box.innerHTML = cards.map((c) => `
+      <div class="insight-card">
+        <span class="insight-badge">${c.badge}</span>
+        <h3>${c.title}</h3>
+        <p>${c.body}</p>
+        ${c.table || ""}
+        <div class="insight-note">${c.note}</div>
+      </div>`).join("") || `<div class="hint">資料還不夠多，晚一點再回來看看。</div>`;
+  }
+
   function renderAll() {
-    renderHeader(); renderControls(); renderKpis(); renderTrend(); renderProviders(); renderHeatmap(); renderValue(); renderTable(); renderIndices(); renderTokens();
+    renderHeader(); renderControls(); renderKpis(); renderTrend(); renderProviders(); renderHeatmap(); renderValue(); renderTable(); renderIndices(); renderTokens(); renderInvestorSummary();
   }
 
   // ------------------------------------------------------------ wiring

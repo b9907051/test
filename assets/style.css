@@ -73,6 +73,25 @@ button, select, input { font: inherit; color: inherit; }
 }
 .banner.show { display: block; }
 .banner code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.banner.info { background: var(--accent-soft); color: var(--ink-2); line-height: 1.6; }
+.banner.info strong { color: var(--ink); }
+
+/* ---------- investor summary ---------- */
+.investor-headline {
+  font-size: 15px; font-weight: 500; line-height: 1.7; color: var(--ink);
+  background: var(--page); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0;
+  padding: 10px 14px; margin: 4px 0 14px;
+}
+.insight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.insight-card { background: var(--page); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.insight-badge {
+  display: inline-block; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft);
+  border-radius: 999px; padding: 2px 10px; margin-bottom: 8px;
+}
+.insight-card h3 { font-size: 15px; margin: 0 0 6px; font-weight: 600; }
+.insight-card p { font-size: 13.5px; line-height: 1.7; color: var(--ink-2); margin: 0; }
+.insight-card table.data { font-size: 12.5px; }
+.insight-note { font-size: 12px; color: var(--muted); margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); line-height: 1.6; }
 
 /* ---------- controls ---------- */
 .controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 10px 0 14px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 16px; }

@@ -64,6 +64,17 @@
     <div class="tile" id="kpi-mover"><div class="label">30 日變動最大</div><div class="value">–</div><div class="delta"></div><div class="spark"></div><div class="foot"></div></div>
   </section>
 
+  <section class="card investor" aria-label="投資人觀察摘要">
+    <header><h2>投資人觀察摘要</h2><span class="hint">由當天即時資料自動生成</span></header>
+    <div class="banner show info">
+      本區塊把本站追蹤到的算力與 token 定價數據，翻譯成給股票投資人參考的觀察筆記。
+      <strong>這是資料觀察，不是投資建議</strong>：樣本僅涵蓋本站抓得到的公開零售市場與少數已揭露的機構指數，
+      不等於任何公司的實際財報數字；文中提到的公司名稱僅為市場參與者的客觀說明，不代表買賣建議，請自行查證判斷。
+    </div>
+    <p class="investor-headline" id="investor-headline">正在計算…</p>
+    <div class="insight-grid" id="investor-summary"></div>
+  </section>
+
   <section class="card">
     <header><h2>價格走勢（各供應商中位數）</h2><span class="hint" id="trend-hint"></span></header>
     <div class="chart" id="trend-chart"></div>
@@ -160,6 +171,7 @@
       <li>「AI 算力價格指數」為籃子內各加速器隨需中位數相對首個快照的幾何平均，基期 = 100。</li>
       <li>性價比以廠商公開規格的 FP16/BF16 密集算力（不含稀疏加速）與記憶體容量換算，只是粗略比較，不代表實際訓練／推論吞吐。</li>
       <li>資料來源：Vast.ai、RunPod、Lambda 公開 API，以及人工維護的公有雲定價頁（見 <code>data/list_prices.json</code>）。價格會隨區域、合約與庫存變動，下單前請以供應商頁面為準。</li>
+      <li>「投資人觀察摘要」由當天資料即時運算生成，僅反映本站抓得到的公開零售市場樣本與少數第三方揭露指數，不等於任何公司的實際財報或營收，文中公司名稱僅為市場參與者的客觀說明，<strong>不構成投資建議</strong>。</li>
     </ul>
   </footer>
 </div>
