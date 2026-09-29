@@ -593,17 +593,23 @@
     const lastWeek = weeks[weeks.length - 1], prevWeek = weeks[weeks.length - 2];
     const top = TKUSE.filter((r) => r.scope === "openrouter_model" && r.d === lastWeek).sort((a, b) => b.n - a.n).slice(0, 15);
     hbarChart($("#usage-chart"), top.map((r) => { const prev = TKUSE.find((q) => q.scope === "openrouter_model" && q.d === prevWeek && q.key === r.key); const ch = prev ? r.n / prev.n - 1 : null;
-      return { label: r.key.split("/").pop(), value: r.n, valueLabel: fmtTok(r.n), color: "var(--accent)", tip: `<div class="t">${r.key}</div><div class="row">本週 token<span class="v">${fmtTok(r.n)}</span></div><div class="row">週增<span class="v">${fmtPct(ch)}</span></div><div class="row">佔平台<span class="v">${lastTot ? (r.n / lastTot.n * 100).toFixed(1) + "%" : "–"}</span></div>` }; }).map((it) => ({ ...it, emphasis: false })), { labelW: 150 });
+      const nm = r.key.split("/").pop(); return { label: nm.length > 20 ? nm.slice(0, 19) + "…" : nm, value: r.n, valueLabel: fmtTok(r.n), color: "var(--accent)", tip: `<div class="t">${r.key}</div><div class="row">本週 token<span class="v">${fmtTok(r.n)}</span></div><div class="row">週增<span class="v">${fmtPct(ch)}</span></div><div class="row">佔平台<span class="v">${lastTot ? (r.n / lastTot.n * 100).toFixed(1) + "%" : "–"}</span></div>` }; }).map((it) => ({ ...it, emphasis: false })), { labelW: 150 });
     $("#usage-hint").textContent = lastWeek ? `OpenRouter 上一週用量最高的 15 個模型（截至 ${lastWeek}），輸入＋輸出 token 合計。T = 兆（10¹²）。` : "尚無資料";
     const tAxis = totals.map((r) => r.d).filter((d) => toT(d) >= from);
     lineChart($("#usage-total-chart"), tAxis, [{ id: "tot", name: "週 token 量", color: "var(--s3)", values: tAxis.map((d) => (totals.find((r) => r.d === d) || {}).n ?? null) }], { height: 220, rightPad: 90, fmtY: (v) => fmtTok(v), aria: "OpenRouter 每週 token 總量" });
     // ---- industry totals table
     const ind = TKUSE.filter((r) => r.scope === "industry").sort((a, b) => a.t - b.t);
     const byOrg = new Map(); for (const r of ind) { if (!byOrg.has(r.key)) byOrg.set(r.key, []); byOrg.get(r.key).push(r); }
+    const liveWeeks = totals.filter((r) => r.src === "openrouter");
+    if (liveWeeks.length) {   // live OpenRouter platform volume, scaled from the latest complete week to a month
+      const toMonth = (r, note) => ({ ...r, n: r.n * 30 / 7, name: "OpenRouter（平台，本站即時）", url: "https://openrouter.ai/rankings", note, live: true });
+      const pts = [liveWeeks[0], liveWeeks[liveWeeks.length - 1]].filter((r, i, arr) => i === 0 || r !== arr[0]);
+      byOrg.set("openrouter-live", pts.map((r) => toMonth(r, `週 ${fmtTok(r.n)} × 30/7`)));
+    }
     let ih = `<table class="data"><thead><tr><th>組織</th><th class="num">每月 token</th><th>揭露日期</th><th class="num">較上次揭露</th><th class="num">年化成長</th><th>來源</th></tr></thead><tbody>`;
     for (const [org, list] of [...byOrg.entries()].sort((a, b) => b[1][b[1].length - 1].n - a[1][a[1].length - 1].n)) {
       const last = list[list.length - 1], prev = list.length > 1 ? list[list.length - 2] : null;
-      const yrs = prev ? (last.t - prev.t) / (365 * DAY) : null, cagr = prev && yrs > 0 ? Math.pow(last.n / prev.n, 1 / yrs) - 1 : null;
+      const yrs = prev ? (last.t - prev.t) / (365 * DAY) : null, cagr = prev && yrs >= 0.25 ? Math.pow(last.n / prev.n, 1 / yrs) - 1 : null;   // no annualising a few weeks
       ih += `<tr><td>${last.name || org}</td><td class="num"><b>${fmtTok(last.n)}</b></td><td class="src">${last.d}${last.note ? " · " + last.note : ""}</td><td class="num">${prev ? (last.n / prev.n).toFixed(1) + "×" : "–"}</td><td class="num">${cagr == null ? "–" : (cagr * 100).toFixed(0) + "%"}</td><td class="src">${last.url ? `<a href="${last.url}" target="_blank" rel="noopener">連結</a>` : "–"}</td></tr>`;
     }
     $("#industry-table").innerHTML = ih + "</tbody></table>";

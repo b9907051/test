@@ -22,8 +22,7 @@
     {"date": "2025-10-01", "org": "google",    "name": "Google（Gemini 全產品）", "tokens_per_month": 1.3e15,  "source_url": "https://techjacksolutions.com/ai-brief/google-reports-32-quadrillion-monthly-tokens-at-io-2026-the/", "note": "2025 Q3 財報"},
     {"date": "2026-05-01", "org": "google",    "name": "Google（Gemini 全產品）", "tokens_per_month": 3.2e15,  "source_url": "https://techjacksolutions.com/ai-brief/google-reports-32-quadrillion-monthly-tokens-at-io-2026-the/", "note": "I/O 2026 揭露 3.2Q"},
     {"date": "2026-03-31", "org": "microsoft", "name": "Microsoft（Azure AI Foundry）", "tokens_per_month": 3.4e13, "source_url": "https://io-fund.com/ai-stocks/ai-token-demand-shattering-forecasts", "note": "2026-04 財報：單季 >100T，換算每月約 34T"},
-    {"date": "2026-08-01", "org": "together",  "name": "Together AI", "tokens_per_month": 4.0e14, "source_url": "https://www.kucoin.com/news/flash/together-ai-processes-400-trillion-inference-tokens-monthly-surging-13-000x-in-a-year", "note": "公司揭露 400T/月"},
-    {"date": "2026-08-01", "org": "openrouter","name": "OpenRouter（平台）", "tokens_per_month": 1.08e14, "source_url": "https://openrouter.ai/rankings", "note": "週 25T × 4.33"}
+    {"date": "2026-08-01", "org": "together",  "name": "Together AI", "tokens_per_month": 4.0e14, "source_url": "https://www.kucoin.com/news/flash/together-ai-processes-400-trillion-inference-tokens-monthly-surging-13-000x-in-a-year", "note": "公司揭露 400T/月"}
   ],
   "usage": []
 }

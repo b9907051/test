@@ -166,6 +166,20 @@ def openrouter_usage(days):
             if bk in complete:
                 agg[(bk, slug)] = agg.get((bk, slug), 0.0) + v
         per = agg
+    else:
+        # Weekly rows are labelled by the week's first day (2026-08-31, 09-07 ... all Mondays). The latest
+        # one is usually the week still in progress (e.g. one day of data), which would read as a crash.
+        # Keep only weeks that have fully ended, and relabel each by its last day to match the daily path.
+        today = dt.date.today()
+        agg = {}
+        for (d, slug), v in per.items():
+            end = dt.date.fromisoformat(d) + dt.timedelta(days=6)
+            if end < today:
+                agg[(end.isoformat(), slug)] = agg.get((end.isoformat(), slug), 0.0) + v
+        dropped = sorted({d for d, _ in per} - {(dt.date.fromisoformat(k[0]) - dt.timedelta(days=6)).isoformat() for k in agg})
+        if dropped:
+            print(f"  [openrouter_usage] dropped in-progress week(s) starting {dropped}")
+        per = agg
 
     out, totals = [], {}
     for (d, slug), v in per.items():
@@ -252,9 +266,11 @@ def main():
     a = ap.parse_args()
 
     got = {"prices": [], "otpi": [], "usage": []}
+    ran = set()
     for name in [n.strip() for n in a.only.split(",") if n.strip()]:
         try:
             res = ADAPTERS[name](a.days)
+            ran.add(name)
             for k, v in res.items():
                 got[k] += v
             print(f"[{name}] " + ", ".join(f"{k}={len(v)}" for k, v in res.items()))
@@ -281,6 +297,15 @@ def main():
     udoc = load(up, {"meta": {}, "rows": []})
     if any(r[4] not in ("manual", "demo") for r in got["usage"] if r[1] != "industry"):
         udoc["rows"] = [r for r in udoc["rows"] if r[4] != "demo"]
+    if "manual" in ran:
+        # data/token_manual.json is the single source for industry rows: an entry deleted there disappears here
+        udoc["rows"] = [r for r in udoc["rows"] if r[1] != "industry"]
+    live_or = [r for r in got["usage"] if r[4] == "openrouter"]
+    if live_or:
+        # the API re-serves its whole recent window each run: replace our copy of that window (so a
+        # relabelled or since-completed week can never linger), keep older history untouched
+        start = (dt.date.fromisoformat(min(r[0] for r in live_or)) - dt.timedelta(days=7)).isoformat()
+        udoc["rows"] = [r for r in udoc["rows"] if not (r[4] == "openrouter" and r[0] >= start)]
     udoc["rows"] = merge(udoc["rows"], got["usage"], 3)
     udoc["meta"] = {**udoc["meta"], "generated_at": now, "unit": "tokens",
                     "columns": ["date", "scope", "key", "tokens", "source", "name?", "source_url?", "note?"],
