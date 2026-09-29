@@ -223,3 +223,12 @@ footer.note ul { margin: 4px 0 0; padding-left: 18px; }
   .tile .value { font-size: 26px; }
   .top h1 { font-size: 19px; }
 }
+
+/* ---------- token usage long-term trend ---------- */
+.usage-trend { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.usage-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.usage-head h3.sub { margin: 0; }
+.usage-ctl { display: flex; gap: 8px; flex-wrap: wrap; }
+.usage-ctl .seg button { padding: 4px 10px; font-size: 12px; }
+.usage-stats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 10px 0 6px; font-size: 13px; color: var(--ink-2); }
+.usage-stats b { color: var(--ink); font-size: 16px; font-variant-numeric: tabular-nums; margin-right: 4px; }

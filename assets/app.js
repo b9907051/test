@@ -20,6 +20,8 @@
     sort: { key: "usd", dir: 1 },
     tokenModels: new Set(["claude-sonnet-5", "gpt-5-6-terra", "gemini-3-8-flash", "deepseek-v4-pro", "claude-opus-5", "grok-4-6"]),
     tokenMetric: "blend",
+    usageRange: 0,          // 0 = all history
+    usageScale: null,       // null = auto (log when the series spans more than 20x)
   };
   try {
     const saved = JSON.parse(localStorage.getItem("aipt-state") || "{}");
@@ -32,13 +34,15 @@
     if (saved.indexGpu) state.indexGpu = saved.indexGpu;
     if (saved.tokenModels) state.tokenModels = new Set(saved.tokenModels);
     if (saved.tokenMetric) state.tokenMetric = saved.tokenMetric;
+    if (saved.usageRange !== undefined) state.usageRange = saved.usageRange;
+    if (saved.usageScale) state.usageScale = saved.usageScale;
   } catch (_) { /* storage unavailable: defaults are fine */ }
   const persist = () => {
     try {
       localStorage.setItem("aipt-state", JSON.stringify({
         type: state.type, rangeDays: state.rangeDays, gpus: [...state.gpus],
         currency: state.currency, twdRate: state.twdRate, providerGpu: state.providerGpu, indexGpu: state.indexGpu,
-        tokenModels: [...state.tokenModels], tokenMetric: state.tokenMetric,
+        tokenModels: [...state.tokenModels], tokenMetric: state.tokenMetric, usageRange: state.usageRange, usageScale: state.usageScale,
       }));
     } catch (_) { /* ignore */ }
   };
@@ -61,6 +65,7 @@
   const fmtDate = (d) => d; // ISO already
   const fmtShortDate = (t) => { const d = new Date(t); return `${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
   const toT = (iso) => Date.parse(iso + "T00:00:00Z");
+  const fetchData = (url) => fetch(url, { cache: "no-cache" });
   const median = (arr) => { const a = arr.filter((x) => x != null).sort((x, y) => x - y); if (!a.length) return null; const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
   const geomean = (arr) => arr.length ? Math.exp(arr.reduce((s, x) => s + Math.log(x), 0) / arr.length) : null;
 
@@ -140,16 +145,34 @@
     }
     const t0 = toT(dates[0]), t1 = toT(dates[dates.length - 1]) || t0 + 1;
     const x = (t) => m.left + (t1 === t0 ? pw / 2 : ((t - t0) / (t1 - t0)) * pw);
-    const maxV = Math.max(...visible.flatMap((s) => s.values.filter((v) => v != null))) * (opts.headroom ?? 1.08);
-    const ticks = niceTicks(maxV, 5), yMax = ticks[ticks.length - 1];
-    const y = (v) => m.top + ph - (v / yMax) * ph;
+    const allV = visible.flatMap((s) => s.values.filter((v) => v != null));
+    let ticks, y, yBase;
+    if (opts.log) {
+      // log scale: equal vertical distance = equal growth multiple; ticks at 1, 2, 5 x 10^k
+      const pos = allV.filter((v) => v > 0);
+      const nice = [1, 2, 5, 10];   // snap bounds to the nearest 1/2/5 x 10^k around the data, not a whole decade
+      const floorNice = (v) => { const e = Math.pow(10, Math.floor(Math.log10(v))); return nice.filter((k) => k * e <= v).pop() * e; };
+      const ceilNice = (v) => { const e = Math.pow(10, Math.floor(Math.log10(v))); return nice.find((k) => k * e >= v) * e; };
+      const lo = floorNice(Math.min(...pos)), hi = ceilNice(Math.max(...pos) * 1.05);
+      const L = (v) => Math.log10(v), span = L(hi) - L(lo) || 1;
+      y = (v) => m.top + ph - ((L(Math.max(v, lo)) - L(lo)) / span) * ph;
+      ticks = [];
+      for (let k = Math.floor(L(lo)); k <= Math.ceil(L(hi)); k++) for (const mul of span > 3 ? [1] : [1, 2, 5]) { const v = mul * Math.pow(10, k); if (v >= lo * 0.999 && v <= hi * 1.001) ticks.push(v); }
+      if (!ticks.includes(hi)) ticks.push(hi);
+      yBase = lo;
+    } else {
+      const maxV = Math.max(...allV) * (opts.headroom ?? 1.08);
+      ticks = niceTicks(maxV, 5); const yMax = ticks[ticks.length - 1];
+      y = (v) => m.top + ph - (v / yMax) * ph;
+      yBase = 0;
+    }
 
     const grid = svgEl("g", { class: "grid" }, svg), tk = svgEl("g", { class: "ticks" }, svg);
     for (const v of ticks) {
       svgEl("line", { x1: m.left, x2: W - m.right, y1: y(v), y2: y(v) }, grid);
       svgEl("text", { x: m.left - 8, y: y(v) + 4, "text-anchor": "end" }, tk).textContent = opts.fmtY ? opts.fmtY(v) : v;
     }
-    svgEl("line", { x1: m.left, x2: W - m.right, y1: y(0), y2: y(0), class: "axis" }, svgEl("g", { class: "axis" }, svg));
+    svgEl("line", { x1: m.left, x2: W - m.right, y1: y(yBase), y2: y(yBase), class: "axis" }, svgEl("g", { class: "axis" }, svg));
     // x ticks: month starts, thinned to fit
     const months = []; let lastKey = "";
     for (const d of dates) { const k = d.slice(0, 7); if (k !== lastKey) { months.push(d); lastKey = k; } }
@@ -595,8 +618,7 @@
     hbarChart($("#usage-chart"), top.map((r) => { const prev = TKUSE.find((q) => q.scope === "openrouter_model" && q.d === prevWeek && q.key === r.key); const ch = prev ? r.n / prev.n - 1 : null;
       const nm = r.key.split("/").pop(); return { label: nm.length > 20 ? nm.slice(0, 19) + "…" : nm, value: r.n, valueLabel: fmtTok(r.n), color: "var(--accent)", tip: `<div class="t">${r.key}</div><div class="row">本週 token<span class="v">${fmtTok(r.n)}</span></div><div class="row">週增<span class="v">${fmtPct(ch)}</span></div><div class="row">佔平台<span class="v">${lastTot ? (r.n / lastTot.n * 100).toFixed(1) + "%" : "–"}</span></div>` }; }).map((it) => ({ ...it, emphasis: false })), { labelW: 150 });
     $("#usage-hint").textContent = lastWeek ? `OpenRouter 上一週用量最高的 15 個模型（截至 ${lastWeek}），輸入＋輸出 token 合計。T = 兆（10¹²）。` : "尚無資料";
-    const tAxis = totals.map((r) => r.d).filter((d) => toT(d) >= from);
-    lineChart($("#usage-total-chart"), tAxis, [{ id: "tot", name: "週 token 量", color: "var(--s3)", values: tAxis.map((d) => (totals.find((r) => r.d === d) || {}).n ?? null) }], { height: 220, rightPad: 90, fmtY: (v) => fmtTok(v), aria: "OpenRouter 每週 token 總量" });
+    renderUsageTrend(totals);
     // ---- industry totals table
     const ind = TKUSE.filter((r) => r.scope === "industry").sort((a, b) => a.t - b.t);
     const byOrg = new Map(); for (const r of ind) { if (!byOrg.has(r.key)) byOrg.set(r.key, []); byOrg.get(r.key).push(r); }
@@ -625,6 +647,44 @@
     $("#otpi-table").innerHTML = oh;
     $("#token-demo").style.display = (TKMETA.pricesDemo || TKMETA.usageDemo) ? "" : "none";
   }
+  // long-term weekly usage: own range + scale, 4-week moving average, growth multiples
+  function renderUsageTrend(totals) {
+    const all = totals.filter((r) => r.n > 0);
+    const statsEl = $("#usage-stats");
+    $$("#usage-range button").forEach((b) => b.setAttribute("aria-pressed", +b.dataset.v === state.usageRange));
+    if (all.length < 2) { lineChart($("#usage-total-chart"), [], [], {}); statsEl.innerHTML = ""; return; }
+    const lastT = all[all.length - 1].t;
+    const shown = state.usageRange ? all.filter((r) => r.t >= lastT - state.usageRange * DAY) : all;
+    const ma = all.map((r, i) => { const w = all.slice(Math.max(0, i - 3), i + 1); return w.length === 4 ? w.reduce((s, x) => s + x.n, 0) / 4 : null; });
+    const maOf = new Map(all.map((r, i) => [r.d, ma[i]]));
+    const spread = Math.max(...shown.map((r) => r.n)) / Math.min(...shown.map((r) => r.n));
+    const scale = state.usageScale || (spread > 20 ? "log" : "linear");
+    $$("#usage-scale button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.v === scale));
+    const dates = shown.map((r) => r.d);
+    const series = [
+      { id: "wk", name: "每週", color: "var(--de-emph)", values: shown.map((r) => r.n) },
+      { id: "ma", name: "4 週平均", color: "var(--s3)", values: dates.map((d) => maOf.get(d) ?? null) },
+    ];
+    lineChart($("#usage-total-chart"), dates, series, { height: 300, rightPad: 110, log: scale === "log", headroom: 1.05, fmtY: (v) => fmtTok(v), aria: "OpenRouter 每週 token 總量與 4 週移動平均" });
+    $("#usage-legend").innerHTML = series.map((s) => `<li style="--c:${s.color}"><span class="sw"></span>${s.name}</li>`).join("");
+    $("#usage-scale-hint").textContent = scale === "log"
+      ? "對數刻度：垂直方向每一格代表「乘上固定倍數」，同樣斜率 = 同樣的成長速度，適合看長期指數型成長。"
+      : "線性刻度：看絕對量的增減。資料跨度很大時，早期的數值會被壓在底部。";
+    // growth multiples on 4-week averages (less noisy than single weeks)
+    const lastMA = ma[ma.length - 1] ?? all[all.length - 1].n;
+    const maAt = (days) => { const t = lastT - days * DAY; let best = null; all.forEach((r, i) => { if (ma[i] != null && Math.abs(r.t - t) <= 10 * DAY && (!best || Math.abs(r.t - t) < Math.abs(best.t - t))) best = { t: r.t, v: ma[i] }; }); return best && best.v; };
+    const stats = [];
+    stats.push(`<span><b>${fmtTok(all[all.length - 1].n)}</b>最新一週（${all[all.length - 1].d}）</span>`);
+    const q = maAt(91); if (q) stats.push(`<span><b>${(lastMA / q).toFixed(2)}×</b>近 3 個月</span>`);
+    const y1 = maAt(365); if (y1) stats.push(`<span><b>${(lastMA / y1).toFixed(1)}×</b>近 1 年（年增 ${((lastMA / y1 - 1) * 100).toFixed(0)}%）</span>`);
+    const y2 = maAt(730); if (y2) stats.push(`<span><b>${(lastMA / y2).toFixed(0)}×</b>近 2 年</span>`);
+    const firstMA = ma.find((v) => v != null);
+    const spanY = (lastT - all[0].t) / (365 * DAY);
+    if (firstMA && spanY >= 1) stats.push(`<span><b>${Math.pow(lastMA / firstMA, 1 / spanY).toFixed(1)}×</b>每年平均成長倍數（自 ${all[0].d}）</span>`);
+    if (spanY < 0.5) stats.push(`<span>目前只有 ${all.length} 週資料，歷史回補完成後會自動顯示長期成長倍數。</span>`);
+    statsEl.innerHTML = stats.join("");
+  }
+
   function setDeltaUp(el, pct, label) {   // for volumes: up is neutral-good, shown in ink
     el.textContent = pct == null ? "–" : `${pct >= 0 ? "▲" : "▼"} ${(Math.abs(pct) * 100).toFixed(1)}% ${label}`; el.className = "delta";
   }
@@ -772,6 +832,8 @@
     $("#provider-gpu").addEventListener("change", (e) => { state.providerGpu = e.target.value; persist(); renderProviders(); });
     $("#value-seg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.valueMetric = b.dataset.v; renderControls(); renderValue(); });
     $("#index-gpu").addEventListener("change", (e) => { state.indexGpu = e.target.value; persist(); renderIndices(); });
+    $("#usage-range").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.usageRange = +b.dataset.v; persist(); renderTokens(); });
+    $("#usage-scale").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.usageScale = b.dataset.v; persist(); renderTokens(); });
     $("#token-metric").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; state.tokenMetric = b.dataset.v; persist(); renderTokens(); });
     $("#export-latest").addEventListener("click", () => exportCsv(false));
     $("#export-all").addEventListener("click", () => exportCsv(true));
@@ -789,14 +851,14 @@
   async function load() {
     try {
       const [cat, prices, ixsrc, ix] = await Promise.all([
-        fetch("data/catalog.json").then((r) => r.json()), fetch("data/prices.json").then((r) => r.json()),
-        fetch("data/index_sources.json").then((r) => r.json()).catch(() => ({ indices: [] })),
-        fetch("data/indices.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [] })),
+        fetchData("data/catalog.json").then((r) => r.json()), fetchData("data/prices.json").then((r) => r.json()),
+        fetchData("data/index_sources.json").then((r) => r.json()).catch(() => ({ indices: [] })),
+        fetchData("data/indices.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [] })),
       ]);
       const [tkcat, tkp, tku] = await Promise.all([
-        fetch("data/token_catalog.json").then((r) => r.json()).catch(() => null),
-        fetch("data/token_prices.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [], otpi: [] })),
-        fetch("data/token_usage.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [] })),
+        fetchData("data/token_catalog.json").then((r) => r.json()).catch(() => null),
+        fetchData("data/token_prices.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [], otpi: [] })),
+        fetchData("data/token_usage.json").then((r) => r.json()).catch(() => ({ meta: {}, rows: [] })),
       ]);
       if (tkcat) {
         TK = tkcat;

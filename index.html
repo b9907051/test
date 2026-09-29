@@ -134,6 +134,27 @@
     <ul class="legend" id="token-legend"></ul>
     <h3 class="sub">最新牌價（每百萬 token，USD）</h3>
     <div class="tbl" id="token-table"></div>
+    <div class="usage-trend">
+      <div class="usage-head">
+        <h3 class="sub">OpenRouter 每週 token 總量：中長期趨勢</h3>
+        <div class="usage-ctl">
+          <div class="seg" id="usage-range" role="group" aria-label="時間範圍">
+            <button type="button" data-v="182">6 個月</button>
+            <button type="button" data-v="365">1 年</button>
+            <button type="button" data-v="730">2 年</button>
+            <button type="button" data-v="0">全部</button>
+          </div>
+          <div class="seg" id="usage-scale" role="group" aria-label="刻度">
+            <button type="button" data-v="linear">線性</button>
+            <button type="button" data-v="log">對數</button>
+          </div>
+        </div>
+      </div>
+      <div class="usage-stats" id="usage-stats"></div>
+      <div class="chart" id="usage-total-chart"></div>
+      <ul class="legend" id="usage-legend"></ul>
+      <div class="hint" id="usage-scale-hint"></div>
+    </div>
     <div class="grid2" style="margin-top:14px">
       <div>
         <h3 class="sub">市場用量：OpenRouter 上一週 Top 15 模型</h3>
@@ -141,9 +162,7 @@
         <div class="chart" id="usage-chart"></div>
       </div>
       <div>
-        <h3 class="sub">OpenRouter 每週 token 總量</h3>
-        <div class="chart" id="usage-total-chart"></div>
-        <h3 class="sub" style="margin-top:14px">Ornn OTPI：各實驗室實際成交價</h3>
+        <h3 class="sub">Ornn OTPI：各實驗室實際成交價</h3>
         <div class="tbl" id="otpi-table"></div>
       </div>
     </div>

@@ -11,7 +11,7 @@ Adapters (each fails independently):
 Run: python3 scripts/collect_tokens.py [--only openrouter_prices,manual] [--days 30] [--dry-run]
 """
 from __future__ import annotations
-import argparse, datetime as dt, json, os, pathlib, re, sys, urllib.error, urllib.parse, urllib.request
+import argparse, datetime as dt, json, os, pathlib, re, sys, time, urllib.error, urllib.parse, urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -84,6 +84,19 @@ def manual(days):
 
 
 # ----------------------------------------------------------------- usage
+OR_HISTORY_START = dt.date(2023, 1, 2)   # how far back the one-time usage backfill reaches
+BACKFILL = {}                            # filled by openrouter_usage, persisted into token_usage.json meta
+
+
+def _stored_usage_dates():
+    p = DATA / "token_usage.json"
+    if not p.exists():
+        return []
+    doc = json.loads(p.read_text())
+    BACKFILL.update((doc.get("meta") or {}).get("openrouter_backfill") or {})
+    return sorted(r[0] for r in doc.get("rows", []) if r[1] == "openrouter_total" and r[4] == "openrouter")
+
+
 OR_USAGE_PATHS = ["/api/v1/datasets/model-rankings", "/api/v1/datasets/rankings-daily",
                   "/api/v1/datasets/daily-token-totals", "/api/v1/datasets/rankings/daily"]
 
@@ -109,28 +122,75 @@ def openrouter_usage(days):
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY not set (free key from openrouter.ai/settings/keys)")
     headers = {"Authorization": f"Bearer {key}"}
-    q = urllib.parse.urlencode({"period": "week"})
-    doc = None
-    for path in OR_USAGE_PATHS:
+    today = dt.date.today()
+
+    def get(path, params):
+        return http_json(f"https://openrouter.ai{path}?{urllib.parse.urlencode(params)}", headers=headers)
+
+    # a recent window: 8 full weeks, Monday-aligned so no week is split across requests
+    this_monday = today - dt.timedelta(days=today.weekday())
+    recent = {"period": "week", "start_date": (this_monday - dt.timedelta(weeks=8)).isoformat(), "end_date": today.isoformat()}
+    path, first = None, None
+    dates_ok = True
+    for cand in OR_USAGE_PATHS:
         try:
-            doc = http_json(f"https://openrouter.ai{path}?{q}", headers=headers)
-            print(f"  [openrouter_usage] using {path}")
-            break
+            first = get(cand, recent); path = cand
         except urllib.error.HTTPError as e:
             if e.code in (404, 405):
                 continue
-            raise
-    if doc is None:
+            if e.code in (400, 422):   # route exists but rejects the date range: fall back to its default window
+                print(f"  [openrouter_usage] {cand} rejected start_date/end_date (HTTP {e.code}); using default window", file=sys.stderr)
+                first = get(cand, {"period": "week"}); path = cand; dates_ok = False
+            else:
+                raise
+        print(f"  [openrouter_usage] using {cand}")
+        break
+    if path is None:
         raise RuntimeError("no configured Data API path answered; check openrouter.ai/docs/api/api-reference/datasets and edit OR_USAGE_PATHS")
 
-    rows = doc
-    if isinstance(doc, dict):
-        rows = doc.get("data", doc.get("rows", doc.get("results", [])))
-        if isinstance(rows, dict):   # e.g. {"data": {"rows": [...]}}
-            rows = next((v for v in rows.values() if isinstance(v, list)), [])
-    if not isinstance(rows, list):
-        raise RuntimeError(f"unexpected response shape: {json.dumps(doc)[:300]}")
-    print(f"  [openrouter_usage] {len(rows)} rows; first row: {json.dumps(rows[0])[:300] if rows else '-'}")
+    def rows_of(doc):
+        rows = doc
+        if isinstance(doc, dict):
+            rows = doc.get("data", doc.get("rows", doc.get("results", [])))
+            if isinstance(rows, dict):   # e.g. {"data": {"rows": [...]}}
+                rows = next((v for v in rows.values() if isinstance(v, list)), [])
+        if not isinstance(rows, list):
+            raise RuntimeError(f"unexpected response shape: {json.dumps(doc)[:300]}")
+        return [r for r in rows if isinstance(r, dict)]
+
+    rows = rows_of(first)
+    print(f"  [openrouter_usage] recent window: {len(rows)} rows; first row: {json.dumps(rows[0])[:300] if rows else '-'}")
+
+    # one-time history backfill: runs until our stored history reaches OR_HISTORY_START, or until the API
+    # has shown it has nothing older (recorded in BACKFILL so later runs stop asking)
+    have = _stored_usage_dates()
+    need = not have or min(have) > (OR_HISTORY_START + dt.timedelta(days=14)).isoformat()
+    if need and dates_ok and not BACKFILL.get("done"):
+        start = OR_HISTORY_START - dt.timedelta(days=OR_HISTORY_START.weekday())
+        stop = this_monday - dt.timedelta(weeks=8)
+        earliest = None
+        while start < stop:
+            end = min(start + dt.timedelta(weeks=26) - dt.timedelta(days=1), stop - dt.timedelta(days=1))
+            try:
+                chunk = rows_of(get(path, {"period": "week", "start_date": start.isoformat(), "end_date": end.isoformat()}))
+            except urllib.error.HTTPError as e:
+                try: body = e.read().decode()[:200]
+                except Exception: body = ""
+                print(f"  [openrouter_usage] backfill {start}..{end} -> HTTP {e.code} {body}", file=sys.stderr)
+                start = end + dt.timedelta(days=1); continue
+            ds = sorted({str(r.get("date") or r.get("day") or "")[:10] for r in chunk} - {""})
+            inside = [d for d in ds if start.isoformat() <= d <= end.isoformat()]
+            print(f"  [openrouter_usage] backfill {start}..{end}: {len(chunk)} rows, periods {ds[0] if ds else '-'}..{ds[-1] if ds else '-'}")
+            if ds and not inside:
+                print("  [openrouter_usage] API ignored start_date/end_date; stopping backfill", file=sys.stderr)
+                break
+            rows += [r for r in chunk if start.isoformat() <= str(r.get("date") or r.get("day") or "")[:10] <= end.isoformat()]
+            if inside and earliest is None:
+                earliest = inside[0]
+            start = end + dt.timedelta(days=1)
+            time.sleep(2.5)   # Data API allows 30 requests/minute
+        BACKFILL.update({"done": True, "earliest": earliest, "checked": today.isoformat()})
+        print(f"  [openrouter_usage] backfill finished; earliest period available: {earliest}")
 
     per = {}      # (date, slug) -> tokens
     for r in rows:
@@ -141,8 +201,7 @@ def openrouter_usage(days):
         toks = _num(r.get("total_tokens")) or (_num(r.get("prompt_tokens")) + _num(r.get("completion_tokens"))) or _num(r.get("tokens"))
         if not date or not slug or toks <= 0:
             continue
-        k = (date, slug)
-        per[k] = per.get(k, 0.0) + toks
+        per[(date, slug)] = toks   # rows are unique per (period, model); a repeat is the same row served twice
 
     dates = sorted({d for d, _ in per})
     if not dates:
@@ -181,11 +240,12 @@ def openrouter_usage(days):
             print(f"  [openrouter_usage] dropped in-progress week(s) starting {dropped}")
         per = agg
 
-    out, totals = [], {}
+    totals, models = {}, {}
     for (d, slug), v in per.items():
         totals[d] = totals.get(d, 0.0) + v
         if slug != "other":
-            out.append([d, "openrouter_model", base_slug(slug), round(v), "openrouter"])
+            k = (d, base_slug(slug)); models[k] = models.get(k, 0.0) + v
+    out = [[d, "openrouter_model", k, round(v), "openrouter"] for (d, k), v in models.items()]
     out += [[d, "openrouter_total", "all", round(t), "openrouter"] for d, t in totals.items()]
     if totals:
         lastd = max(totals)
@@ -304,12 +364,16 @@ def main():
     if live_or:
         # the API re-serves its whole recent window each run: replace our copy of that window (so a
         # relabelled or since-completed week can never linger), keep older history untouched
+        # strictly after (earliest new week - 7 days): catches the same weeks under an older start-date label,
+        # but never the last week before the window, which this run did not re-serve
         start = (dt.date.fromisoformat(min(r[0] for r in live_or)) - dt.timedelta(days=7)).isoformat()
-        udoc["rows"] = [r for r in udoc["rows"] if not (r[4] == "openrouter" and r[0] >= start)]
+        udoc["rows"] = [r for r in udoc["rows"] if not (r[4] == "openrouter" and r[0] > start)]
     udoc["rows"] = merge(udoc["rows"], got["usage"], 3)
     udoc["meta"] = {**udoc["meta"], "generated_at": now, "unit": "tokens",
                     "columns": ["date", "scope", "key", "tokens", "source", "name?", "source_url?", "note?"],
                     "demo": any(r[4] == "demo" for r in udoc["rows"])}
+    if BACKFILL:
+        udoc["meta"]["openrouter_backfill"] = BACKFILL
 
     if a.dry_run:
         print(json.dumps({k: v[:5] for k, v in got.items()}, indent=1, ensure_ascii=False)); return
