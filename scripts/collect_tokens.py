@@ -88,7 +88,23 @@ OR_USAGE_PATHS = ["/api/v1/datasets/model-rankings", "/api/v1/datasets/rankings-
                   "/api/v1/datasets/daily-token-totals", "/api/v1/datasets/rankings/daily"]
 
 
+def _num(x):
+    """OpenRouter returns large token counts as strings ("123456789"); accept int/float/str, else 0."""
+    if isinstance(x, bool) or x is None:
+        return 0.0
+    if isinstance(x, (int, float)):
+        return float(x)
+    try:
+        return float(str(x).replace(",", "").strip())
+    except ValueError:
+        return 0.0
+
+
 def openrouter_usage(days):
+    """OpenRouter Data API: top-50 models per period by total tokens, plus one aggregated "other" row.
+    The platform total for a period = sum of all rows (top 50 + other). Rows are bucketed into
+    7-day windows ending on the latest date whenever the API returns daily rows, so the dashboard's
+    "weekly" figures stay weekly regardless of the granularity the endpoint serves."""
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY not set (free key from openrouter.ai/settings/keys)")
@@ -106,19 +122,66 @@ def openrouter_usage(days):
             raise
     if doc is None:
         raise RuntimeError("no configured Data API path answered; check openrouter.ai/docs/api/api-reference/datasets and edit OR_USAGE_PATHS")
-    rows = doc.get("data", doc) if isinstance(doc, dict) else doc
-    out, totals = [], {}
+
+    rows = doc
+    if isinstance(doc, dict):
+        rows = doc.get("data", doc.get("rows", doc.get("results", [])))
+        if isinstance(rows, dict):   # e.g. {"data": {"rows": [...]}}
+            rows = next((v for v in rows.values() if isinstance(v, list)), [])
+    if not isinstance(rows, list):
+        raise RuntimeError(f"unexpected response shape: {json.dumps(doc)[:300]}")
+    print(f"  [openrouter_usage] {len(rows)} rows; first row: {json.dumps(rows[0])[:300] if rows else '-'}")
+
+    per = {}      # (date, slug) -> tokens
     for r in rows:
-        date = str(r.get("date") or r.get("day") or "")[:10]
-        slug = r.get("model_permaslug") or r.get("model") or r.get("permaslug")
-        toks = (r.get("total_tokens") or 0) or (float(r.get("prompt_tokens") or 0) + float(r.get("completion_tokens") or 0))
-        if not date or not slug or not toks:
+        if not isinstance(r, dict):
             continue
-        totals[date] = totals.get(date, 0) + toks
+        date = str(r.get("date") or r.get("day") or r.get("period_start") or r.get("week") or "")[:10]
+        slug = r.get("model_permaslug") or r.get("permaslug") or r.get("model") or r.get("slug")
+        toks = _num(r.get("total_tokens")) or (_num(r.get("prompt_tokens")) + _num(r.get("completion_tokens"))) or _num(r.get("tokens"))
+        if not date or not slug or toks <= 0:
+            continue
+        k = (date, slug)
+        per[k] = per.get(k, 0.0) + toks
+
+    dates = sorted({d for d, _ in per})
+    if not dates:
+        raise RuntimeError("response had no usable (date, model, tokens) rows")
+    gaps = [(dt.date.fromisoformat(b) - dt.date.fromisoformat(a)).days for a, b in zip(dates, dates[1:])]
+    daily = bool(gaps) and statistics_median(gaps) <= 1.5
+    print(f"  [openrouter_usage] {len(dates)} periods {dates[0]}..{dates[-1]} ({'daily -> 7-day buckets' if daily else 'weekly'})")
+
+    if daily:
+        last = dt.date.fromisoformat(dates[-1])
+        def bucket(d):
+            back = (last - dt.date.fromisoformat(d)).days
+            return (last - dt.timedelta(days=(back // 7) * 7)).isoformat()   # label = last day of the 7-day window
+        counts = {}
+        for d in dates:
+            counts[bucket(d)] = counts.get(bucket(d), 0) + 1
+        complete = {bk for bk, n in counts.items() if n >= 7}
+        agg = {}
+        for (d, slug), v in per.items():
+            bk = bucket(d)
+            if bk in complete:
+                agg[(bk, slug)] = agg.get((bk, slug), 0.0) + v
+        per = agg
+
+    out, totals = [], {}
+    for (d, slug), v in per.items():
+        totals[d] = totals.get(d, 0.0) + v
         if slug != "other":
-            out.append([date, "openrouter_model", base_slug(slug), float(toks), "openrouter"])
-    out += [[d, "openrouter_total", "all", float(t), "openrouter"] for d, t in totals.items()]
+            out.append([d, "openrouter_model", base_slug(slug), round(v), "openrouter"])
+    out += [[d, "openrouter_total", "all", round(t), "openrouter"] for d, t in totals.items()]
+    if totals:
+        lastd = max(totals)
+        print(f"  [openrouter_usage] latest window {lastd}: {totals[lastd] / 1e12:.2f} T tokens across {sum(1 for r in out if r[0] == lastd and r[1] == 'openrouter_model')} models")
     return {"usage": out}
+
+
+def statistics_median(xs):
+    xs = sorted(xs); m = len(xs) // 2
+    return xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
 
 
 def ornn_otpi(days):
